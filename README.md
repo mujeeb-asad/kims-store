@@ -1,6 +1,12 @@
 # Kims · 3D store tour
 
-A static site: the photogrammetry mesh of the store, with each of the 25 source photos pinned to the camera pose it was taken from.
+A neighbourhood store rebuilt in 3D from 25 phone photos, with each photo pinned back to the exact spot it was taken from.
+
+### [▶ Open the live tour](https://kims-store.pages.dev)
+
+[![Preview of the Kims 3D store tour: welcome screen, flying into a photo, stepping along the tour and the overview](docs/preview.gif)](https://kims-store.pages.dev)
+
+*Click the preview to open the live site. Use the arrows to walk the store left to right, or switch to Overview to orbit the whole model and pick any camera.*
 
 ## Run locally
 
@@ -25,6 +31,7 @@ assets/cameras.json   25 shot poses in the scene frame + intrinsics
 assets/photos/*.jpg   undistorted photos, 1500x2000
 assets/thumbs/*.jpg   thumbnails for the overview tooltip
 tools/build_assets.py regenerates cameras.json, photos/ and thumbs/
+docs/preview.gif      the animated preview shown in this README
 ```
 
 ## Where the camera data comes from
