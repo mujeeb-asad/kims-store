@@ -1,0 +1,646 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const MODEL_URL = 'assets/kims.glb';
+const CAMERAS_URL = 'assets/cameras.json';
+const OVERVIEW_FOV = 45;
+const PHOTO_DEPTH = 1;       // the photo plane sits this far in front of its camera
+const MARKER_SIZE = 0.32;    // depth of the frustum markers, in model units
+
+const $ = (s) => document.querySelector(s);
+const body = document.body;
+const canvas = $('#scene');
+const ui = {
+  status: $('#load-status .status-text'),
+  retro: $('#retro'),
+  retroBar: $('#retro-bar'),
+  retroPct: $('#retro-pct'),
+  retroBytes: $('#retro-bytes'),
+  retroLine: $('#retro-line'),
+  shotNum: $('#shot-num'),
+  prev: $('#prev'),
+  next: $('#next'),
+  shotTotal: $('#shot-total'),
+  compare: $('#compare'),
+  tooltip: $('#tooltip'),
+  modes: [...document.querySelectorAll('.mode')],
+  pill: $('.mode-pill'),
+};
+
+const pad = (n) => String(n).padStart(2, '0');
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+const easeOutBack = (t) => 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2);
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/* ------------------------------------------------------------------ renderer */
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(OVERVIEW_FOV, 1, 0.02, 600);
+const controls = new OrbitControls(camera, canvas);
+controls.enabled = false;
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 1;
+controls.maxDistance = 120;
+
+/* ------------------------------------------------------------------ tweens */
+
+const tweens = new Set();
+function tween(ms, onUpdate, ease = easeInOutCubic) {
+  let entry;
+  const promise = new Promise((resolve) => {
+    entry = { t0: performance.now(), ms, onUpdate, ease, resolve };
+    tweens.add(entry);
+  });
+  promise.cancel = () => { if (tweens.delete(entry)) entry.resolve(false); };
+  return promise;
+}
+function runTweens(now) {
+  for (const tw of tweens) {
+    const p = clamp((now - tw.t0) / tw.ms, 0, 1);
+    tw.onUpdate(tw.ease(p));
+    if (p >= 1) { tweens.delete(tw); tw.resolve(true); }
+  }
+}
+
+/* ------------------------------------------------------------------ data */
+
+const state = {
+  view: 'welcome',      // welcome | tour | overview
+  shot: -1,             // shot we are at / flying to, -1 when free
+  lastShot: 0,
+  ready: false,
+  pending: null,        // action queued while the model downloads
+  flight: null,
+  compare: false,
+  lastOverview: null,   // where the visitor left the orbit camera
+};
+
+let data;
+try {
+  const res = await fetch(CAMERAS_URL);
+  if (!res.ok) throw new Error(res.status);
+  data = await res.json();
+} catch (err) {
+  body.classList.add('model-error');
+  ui.status.textContent = location.protocol === 'file:'
+    ? 'Open this page through a local web server (see README).'
+    : 'Could not load camera data.';
+  throw err;
+}
+
+const TAN = data.tanHalfFov;
+const A = data.sceneRotation;
+const sceneRotation = new THREE.Matrix4().set(A[0], A[1], A[2], 0, A[3], A[4], A[5], 0, A[6], A[7], A[8], 0, 0, 0, 0, 1);
+
+const shots = data.shots.map((s) => {
+  const [x, y, z] = s.basis.map((v) => new THREE.Vector3(...v));
+  return {
+    id: s.id,
+    photo: s.photo,
+    thumb: s.thumb,
+    position: new THREE.Vector3(...s.position),
+    quaternion: new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z)),
+    right: x,
+  };
+});
+// Tour order runs left to right as seen by the cameras, whatever the file numbering.
+{
+  const right = new THREE.Vector3();
+  shots.forEach((s) => right.add(s.right));
+  const sweep = shots[shots.length - 1].position.clone().sub(shots[0].position).dot(right);
+  if (sweep < 0) shots.reverse();
+}
+const N = shots.length;
+ui.shotTotal.textContent = pad(N);
+
+// Store layout: frame the camera path plus the points the cameras look at (~4.5 units ahead),
+// so the overview shows the shelves and not just the aisle.
+const storeLayout = (() => {
+  const meanFwd = new THREE.Vector3();
+  const pts = [];
+  for (const s of shots) {
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(s.quaternion);
+    meanFwd.add(fwd);
+    pts.push(s.position, s.position.clone().addScaledVector(fwd, 4.5));
+  }
+  const center = new THREE.Vector3();
+  pts.forEach((p) => center.add(p));
+  center.divideScalar(pts.length);
+  let xx = 0, xz = 0, zz = 0;
+  for (const p of pts) {
+    const dx = p.x - center.x, dz = p.z - center.z;
+    xx += dx * dx; xz += dx * dz; zz += dz * dz;
+  }
+  const angle = 0.5 * Math.atan2(2 * xz, xx - zz);
+  const long = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+  const side = new THREE.Vector3(-long.z, 0, long.x);
+  // look from behind the cameras so the shelf fronts face the viewer
+  if (side.dot(meanFwd) > 0) side.negate();
+  let halfLong = 0, halfSide = 0;
+  for (const p of pts) {
+    const d = p.clone().sub(center);
+    halfLong = Math.max(halfLong, Math.abs(d.dot(long)));
+    halfSide = Math.max(halfSide, Math.abs(d.dot(side)));
+  }
+  return { center, long, side, halfLong: halfLong + 1, halfSide: halfSide + 1 };
+})();
+const storeCenter = storeLayout.center;
+
+/* ------------------------------------------------------------------ camera poses */
+
+function lookQuat(pos, target) {
+  const m = new THREE.Matrix4().lookAt(pos, target, new THREE.Vector3(0, 1, 0));
+  return new THREE.Quaternion().setFromRotationMatrix(m);
+}
+
+// Field of view that keeps the photo's frustum inside the viewport with a margin,
+// so the mesh stays visible around it.
+function shotFov() {
+  const aspect = window.innerWidth / window.innerHeight;
+  const kY = window.innerWidth < 560 ? 0.7 : 0.76;
+  const kX = 0.92;
+  const t = Math.max(TAN.y / kY, TAN.x / (aspect * kX));
+  return THREE.MathUtils.radToDeg(2 * Math.atan(t));
+}
+
+function defaultOverview() {
+  const { side, halfLong, halfSide } = storeLayout;
+  const aspect = window.innerWidth / window.innerHeight;
+  const tanV = Math.tan(THREE.MathUtils.degToRad(OVERVIEW_FOV / 2));
+  const dist = Math.max(halfLong / (tanV * aspect), halfSide / tanV) * 1.25;
+  const elev = THREE.MathUtils.degToRad(58);
+  const dir = side.clone().multiplyScalar(Math.cos(elev)).add(new THREE.Vector3(0, Math.sin(elev), 0));
+  return { pos: storeCenter.clone().addScaledVector(dir, dist), target: storeCenter.clone() };
+}
+
+/* ------------------------------------------------------------------ scene content */
+
+const modelRoot = new THREE.Group();
+modelRoot.quaternion.setFromRotationMatrix(sceneRotation);
+scene.add(modelRoot);
+
+// camera markers + tour path
+const markerGroup = new THREE.Group();
+scene.add(markerGroup);
+const markerLineMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9, depthTest: false });
+const markerDotMat = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false });
+const markerHotLineMat = new THREE.LineBasicMaterial({ depthTest: false });
+const markerHotDotMat = new THREE.MeshBasicMaterial({ depthTest: false });
+const pathMat = new THREE.LineDashedMaterial({ dashSize: 0.25, gapSize: 0.18, transparent: true, opacity: 0.5, depthTest: false });
+
+const frustumGeo = (() => {
+  const s = MARKER_SIZE, w = TAN.x * s, h = TAN.y * s;
+  const c = [[-w, -h], [w, -h], [w, h], [-w, h]];
+  const pts = [];
+  for (let i = 0; i < 4; i++) {
+    pts.push(0, 0, 0, c[i][0], c[i][1], -s);
+    pts.push(c[i][0], c[i][1], -s, c[(i + 1) % 4][0], c[(i + 1) % 4][1], -s);
+  }
+  // little "up" tick on the top edge
+  pts.push(-w * 0.35, h, -s, 0, h * 1.35, -s, 0, h * 1.35, -s, w * 0.35, h, -s);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return g;
+})();
+const dotGeo = new THREE.SphereGeometry(0.05, 12, 8);
+
+const markers = shots.map((s) => {
+  const g = new THREE.Group();
+  g.position.copy(s.position);
+  g.quaternion.copy(s.quaternion);
+  const lines = new THREE.LineSegments(frustumGeo, markerLineMat);
+  const dot = new THREE.Mesh(dotGeo, markerDotMat);
+  lines.renderOrder = dot.renderOrder = 5;
+  g.add(lines, dot);
+  markerGroup.add(g);
+  return { group: g, lines, dot };
+});
+
+const pathLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(shots.map((s) => s.position)), pathMat);
+pathLine.computeLineDistances();
+pathLine.renderOrder = 4;
+markerGroup.add(pathLine);
+
+// photo overlay: a plane filling exactly the shot's frustum at PHOTO_DEPTH
+const photoAnchor = new THREE.Group();
+scene.add(photoAnchor);
+const photoMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthTest: false, depthWrite: false, toneMapped: false });
+const photoPlane = new THREE.Mesh(new THREE.PlaneGeometry(2 * TAN.x * PHOTO_DEPTH, 2 * TAN.y * PHOTO_DEPTH), photoMat);
+photoPlane.position.z = -PHOTO_DEPTH;
+photoPlane.renderOrder = 10;
+photoPlane.visible = false;
+photoAnchor.add(photoPlane);
+
+const bracketMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0, depthTest: false });
+const brackets = (() => {
+  const w = TAN.x * PHOTO_DEPTH * 1.025, h = TAN.y * PHOTO_DEPTH * 1.02, l = Math.min(w, h) * 0.12;
+  const pts = [];
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    pts.push(sx * w, sy * h, 0, sx * (w - l), sy * h, 0);
+    pts.push(sx * w, sy * h, 0, sx * w, sy * (h - l), 0);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  const seg = new THREE.LineSegments(g, bracketMat);
+  seg.renderOrder = 11;
+  return seg;
+})();
+photoPlane.add(brackets);
+
+function applyThemeColors() {
+  const accent = new THREE.Color(cssVar('--accent'));
+  const fg = new THREE.Color(cssVar('--fg'));
+  const muted = new THREE.Color(cssVar('--muted'));
+  markerLineMat.color.copy(accent);
+  markerDotMat.color.copy(accent);
+  markerHotLineMat.color.copy(fg);
+  markerHotDotMat.color.copy(fg);
+  pathMat.color.copy(muted);
+  bracketMat.color.copy(accent);
+}
+applyThemeColors();
+
+/* ------------------------------------------------------------------ photos */
+
+const texLoader = new THREE.TextureLoader();
+const texCache = new Map();   // shot index -> Promise<Texture|null>
+let shownTexIndex = -1;
+
+function photoTexture(i) {
+  if (!texCache.has(i)) {
+    texCache.set(i, new Promise((resolve) => {
+      texLoader.load(shots[i].photo, (t) => {
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        resolve(t);
+      }, undefined, () => resolve(null));
+    }));
+  }
+  return texCache.get(i);
+}
+
+// keep the current shot, its neighbours and whatever is on screen; free the rest
+function prunePhotos(center) {
+  const keep = new Set([center - 1, center, center + 1, shownTexIndex]);
+  for (const [i, p] of texCache) {
+    if (!keep.has(i)) { texCache.delete(i); p.then((t) => t && t.dispose()); }
+  }
+}
+
+let photoTween = null;
+function photoOpacity() { return state.compare ? 0.45 : 1; }
+
+function showPhoto(i, tex) {
+  photoTween?.cancel();
+  shownTexIndex = i;
+  photoAnchor.position.copy(shots[i].position);
+  photoAnchor.quaternion.copy(shots[i].quaternion);
+  photoMat.map = tex;
+  photoMat.needsUpdate = true;
+  photoPlane.visible = true;
+  const target = photoOpacity();
+  photoTween = tween(620, (e) => {
+    const s = 0.9 + 0.1 * easeOutBack(e);
+    photoPlane.scale.set(s, s, 1);
+    photoMat.opacity = target * clamp(e * 1.8, 0, 1);
+    bracketMat.opacity = clamp(e * 1.5, 0, 1);
+  }, (t) => t);
+}
+
+function hidePhoto() {
+  if (!photoPlane.visible) return;
+  photoTween?.cancel();
+  const o0 = photoMat.opacity, b0 = bracketMat.opacity;
+  photoTween = tween(200, (e) => {
+    photoMat.opacity = o0 * (1 - e);
+    bracketMat.opacity = b0 * (1 - e);
+  }, easeOutCubic);
+  photoTween.then((done) => { if (done) { photoPlane.visible = false; shownTexIndex = -1; } });
+}
+
+function setCompare(on) {
+  state.compare = on;
+  ui.compare.setAttribute('aria-pressed', String(on));
+  if (photoPlane.visible) {
+    const o0 = photoMat.opacity, o1 = photoOpacity();
+    tween(250, (e) => { photoMat.opacity = o0 + (o1 - o0) * e; });
+  }
+}
+
+/* ------------------------------------------------------------------ flights */
+
+function flyTo(pos, quat, fov) {
+  state.flight?.cancel();
+  controls.enabled = false;
+  body.classList.add('flying');
+  const p0 = camera.position.clone(), q0 = camera.quaternion.clone(), f0 = camera.fov;
+  const dist = p0.distanceTo(pos);
+  const lift = dist > 3 ? Math.min((dist - 3) * 0.12, 1.5) : 0;   // gentle arc on long jumps
+  const ms = clamp(900 + dist * 110, 1000, 2600);
+  const flight = tween(ms, (e) => {
+    camera.position.lerpVectors(p0, pos, e);
+    camera.position.y += Math.sin(Math.PI * e) * lift;
+    camera.quaternion.slerpQuaternions(q0, quat, e);
+    camera.fov = f0 + (fov - f0) * e;
+    camera.updateProjectionMatrix();
+  });
+  state.flight = flight;
+  return flight.then((done) => {
+    if (done) body.classList.remove('flying');
+    return done;
+  });
+}
+
+async function goToShot(i) {
+  if (i < 0 || i >= N) return;   // no wrap-around: the tour ends at the outermost shots
+  if (state.shot === -1 && state.view === 'overview' && controls.enabled) {
+    state.lastOverview = { pos: camera.position.clone(), target: controls.target.clone() };
+  }
+  state.shot = i;
+  state.lastShot = i;
+  body.classList.add('in-shot');
+  markerGroup.visible = false;
+  setHover(-1);
+  ui.shotNum.textContent = pad(i + 1);
+  ui.prev.classList.toggle('is-hidden', i === 0);
+  ui.next.classList.toggle('is-hidden', i === N - 1);
+  hidePhoto();
+
+  const texPromise = photoTexture(i);
+  if (i + 1 < N) photoTexture(i + 1);
+  if (i > 0) photoTexture(i - 1);
+  prunePhotos(i);
+
+  const s = shots[i];
+  const arrived = await flyTo(s.position, s.quaternion, shotFov());
+  if (!arrived) return;
+  const tex = await texPromise;
+  if (tex && state.shot === i && !body.classList.contains('flying')) showPhoto(i, tex);
+}
+
+async function enterOverview() {
+  setView('overview');
+  state.shot = -1;
+  body.classList.remove('in-shot');
+  hidePhoto();
+  markerGroup.visible = true;
+  const { pos, target } = state.lastOverview || defaultOverview();
+  const arrived = await flyTo(pos, lookQuat(pos, target), OVERVIEW_FOV);
+  if (!arrived) return;
+  controls.target.copy(target);
+  controls.enabled = true;
+  controls.update();
+}
+
+function enterTour() {
+  setView('tour');
+  goToShot(state.shot >= 0 ? state.shot : state.lastShot);
+}
+
+/* ------------------------------------------------------------------ view + mode switch */
+
+function setView(view) {
+  state.view = view;
+  body.dataset.view = view;
+  ui.modes.forEach((b) => b.classList.toggle('active', b.dataset.mode === view));
+  const active = ui.modes.find((b) => b.dataset.mode === view);
+  if (active) {
+    ui.pill.style.width = `${active.offsetWidth}px`;
+    ui.pill.style.transform = `translateX(${active.offsetLeft - 4}px)`;
+  }
+}
+
+// Run now if the model is ready, otherwise show the retro loader and run it on load.
+function whenReady(action) {
+  if (state.ready) { action(); return; }
+  state.pending = action;
+  showRetro();
+}
+
+$('#start-tour').addEventListener('click', () => { setView('tour'); whenReady(enterTour); });
+$('#start-overview').addEventListener('click', () => { setView('overview'); whenReady(enterOverview); });
+ui.modes.forEach((b) => b.addEventListener('click', () => {
+  const mode = b.dataset.mode;
+  setView(mode);
+  whenReady(mode === 'tour' ? enterTour : enterOverview);
+}));
+$('#prev').addEventListener('click', () => goToShot(state.shot - 1));
+$('#next').addEventListener('click', () => goToShot(state.shot + 1));
+$('#exit-shot').addEventListener('click', () => enterOverview());
+ui.compare.addEventListener('click', () => setCompare(!state.compare));
+
+window.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || !state.ready || state.view === 'welcome') return;
+  const inShot = state.shot >= 0;
+  if (e.key === 'ArrowRight') { inShot ? goToShot(state.shot + 1) : (setView('tour'), goToShot(state.lastShot)); }
+  else if (e.key === 'ArrowLeft') { inShot ? goToShot(state.shot - 1) : (setView('tour'), goToShot(state.lastShot)); }
+  else if (e.key === 'Escape' && inShot) enterOverview();
+  else if ((e.key === 'c' || e.key === 'C') && inShot) setCompare(!state.compare);
+  else return;
+  e.preventDefault();
+});
+
+/* ------------------------------------------------------------------ theme */
+
+$('#theme-toggle').addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem('kims-theme', next); } catch (e) { /* storage blocked */ }
+  applyThemeColors();
+});
+
+/* ------------------------------------------------------------------ picking, hover, swipe */
+
+const proj = new THREE.Vector3();
+let hovered = -1;
+
+// nearest marker on screen, so small markers stay easy to hit (especially on touch)
+function pickAt(x, y, radius = 28) {
+  if (!markerGroup.visible) return -1;
+  let best = -1, bestD = radius;
+  for (let i = 0; i < N; i++) {
+    const p = proj.copy(shots[i].position).project(camera);
+    if (p.z > 1) continue;  // behind the camera
+    const d = Math.hypot((p.x + 1) / 2 * window.innerWidth - x, (1 - p.y) / 2 * window.innerHeight - y);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+function setHover(i, x, y) {
+  if (i !== hovered) {
+    if (hovered >= 0) {
+      const m = markers[hovered];
+      m.lines.material = markerLineMat; m.dot.material = markerDotMat; m.group.scale.setScalar(1);
+    }
+    hovered = i;
+    if (i >= 0) {
+      const m = markers[i];
+      m.lines.material = markerHotLineMat; m.dot.material = markerHotDotMat; m.group.scale.setScalar(1.4);
+      ui.tooltip.querySelector('img').src = shots[i].thumb;
+      ui.tooltip.querySelector('span').textContent = `Shot ${pad(i + 1)}`;
+    }
+    ui.tooltip.hidden = i < 0;
+    body.classList.toggle('hovering-marker', i >= 0);
+  }
+  if (i >= 0 && x !== undefined) {
+    ui.tooltip.style.left = `${Math.min(x, window.innerWidth - 130)}px`;
+    ui.tooltip.style.top = `${Math.min(y, window.innerHeight - 180)}px`;
+  }
+}
+
+const interactive = () => state.ready && state.view !== 'welcome';
+let down = null;
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!interactive() || e.pointerType !== 'mouse' || down || state.shot >= 0) return;
+  setHover(pickAt(e.clientX, e.clientY), e.clientX, e.clientY);
+});
+canvas.addEventListener('pointerleave', () => setHover(-1));
+canvas.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+canvas.addEventListener('pointerup', (e) => {
+  const d = down; down = null;
+  if (!d || !interactive()) return;
+  const dx = e.clientX - d.x, dy = e.clientY - d.y, dt = performance.now() - d.t;
+  if (state.shot >= 0) {
+    // swipe between shots
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < 800) goToShot(state.shot + (dx < 0 ? 1 : -1));
+    return;
+  }
+  if (Math.hypot(dx, dy) < 6 && dt < 500) {
+    const i = pickAt(e.clientX, e.clientY, e.pointerType === 'mouse' ? 28 : 40);
+    if (i >= 0) goToShot(i);
+  }
+});
+
+/* ------------------------------------------------------------------ loading */
+
+let retroShownAt = 0;
+function showRetro() {
+  if (!ui.retro.hidden) return;
+  ui.retro.classList.remove('leaving');
+  ui.retro.hidden = false;
+  retroShownAt = performance.now();
+}
+function hideRetro() {
+  if (ui.retro.hidden) return Promise.resolve();
+  // keep it up long enough to be read, then let it pop away
+  const wait = Math.max(0, 700 - (performance.now() - retroShownAt));
+  return new Promise((resolve) => setTimeout(() => {
+    ui.retro.classList.add('leaving');
+    setTimeout(() => { ui.retro.hidden = true; resolve(); }, 350);
+  }, wait));
+}
+
+function setProgress(p, loaded) {
+  const pct = Math.round(p * 100);
+  const filled = Math.round(p * 20);
+  ui.retroBar.textContent = `[${'#'.repeat(filled)}${'.'.repeat(20 - filled)}]`;
+  ui.retroPct.textContent = `${pad(Math.min(pct, 99))}%`;
+  if (loaded) ui.retroBytes.textContent = `${(loaded / 1e6).toFixed(1)} MB`;
+  ui.status.textContent = `Building the store in the background · ${pct}%`;
+}
+
+function welcomePose(t) {
+  const { pos } = defaultOverview();
+  const off = pos.clone().sub(storeCenter);
+  off.applyAxisAngle(new THREE.Vector3(0, 1, 0), t * 0.06);
+  const p = storeCenter.clone().add(off.multiplyScalar(0.9));
+  return { pos: p, quat: lookQuat(p, storeCenter) };
+}
+
+function onModelLoaded(gltf) {
+  ui.retroLine.textContent = '> uploading textures';
+  const model = gltf.scene;
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    // Photogrammetry texture already contains the lighting: render it unlit.
+    // FrontSide lets the overview see into the store through the far walls.
+    const old = o.material;
+    if (old.map) { old.map.anisotropy = maxAniso; renderer.initTexture(old.map); }
+    o.material = new THREE.MeshBasicMaterial({ map: old.map, side: THREE.FrontSide });
+    old.dispose();
+  });
+  modelRoot.add(model);
+  renderer.compile(scene, camera);
+
+  state.ready = true;
+  setProgress(1);
+  ui.retroPct.textContent = '100%';
+  ui.retroLine.textContent = '> ready. entering store';
+  ui.status.textContent = `Model ready · ${N} shots`;
+  body.classList.add('model-ready');
+
+  const pending = state.pending;
+  state.pending = null;
+  if (pending) {
+    // start from the establishing shot, then fly in once the loader pops away
+    const w = welcomePose(0);
+    camera.position.copy(w.pos); camera.quaternion.copy(w.quat);
+    hideRetro().then(pending);
+  }
+}
+
+function onModelError(err) {
+  console.error(err);
+  body.classList.add('model-error');
+  ui.status.textContent = 'Could not load the 3D model.';
+  ui.retroLine.textContent = '> ERROR: model failed to load';
+  ui.retroBar.textContent = '[!!!!!!!!!!!!!!!!!!!!]';
+}
+
+const gltfLoader = new GLTFLoader();
+gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+gltfLoader.load(MODEL_URL, onModelLoaded, (xhr) => {
+  // hosts that gzip on the fly don't send a usable length; ease towards 95% instead
+  const p = xhr.lengthComputable && xhr.total ? xhr.loaded / xhr.total : 0.95 * (1 - Math.exp(-xhr.loaded / 4e6));
+  setProgress(Math.min(p, 0.99), xhr.loaded);
+  if (p >= 0.99) ui.retroLine.textContent = '> decoding geometry';
+}, onModelError);
+
+/* ------------------------------------------------------------------ loop */
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  if (state.shot >= 0 && !body.classList.contains('flying')) camera.fov = shotFov();
+  camera.updateProjectionMatrix();
+  setView(state.view);
+}
+window.addEventListener('resize', resize);
+resize();
+document.fonts?.ready.then(() => setView(state.view));
+
+{
+  const w = welcomePose(0);
+  camera.position.copy(w.pos);
+  camera.quaternion.copy(w.quat);
+}
+
+const clock = new THREE.Clock();
+let welcomeT = 0;
+renderer.setAnimationLoop((now) => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  runTweens(now ?? performance.now());
+  if (state.view === 'welcome' && state.ready) {
+    welcomeT += dt;
+    const w = welcomePose(welcomeT);
+    camera.position.copy(w.pos);
+    camera.quaternion.copy(w.quat);
+  } else if (controls.enabled) {
+    controls.update();
+  }
+  renderer.render(scene, camera);
+});
