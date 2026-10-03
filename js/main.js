@@ -821,4 +821,3 @@ renderer.setAnimationLoop((now) => {
   }
   renderer.render(scene, camera);
 });
-window.__look = look;
