@@ -423,7 +423,10 @@ const look = {
   mode: 'locked',        // locked | drag | gyro
   yaw: 0, pitch: 0,      // current offsets from the shot's framing (radians)
   targetYaw: 0, targetPitch: 0,
-  gyroBase: null,        // device yaw/pitch when gyro was (re)centred
+  gyroBase: null,        // device yaw/pitch taken as "straight ahead" once the sensor settles
+  gyroPrev: null,        // previous reading, for settling and glitch detection
+  gyroSteady: 0,         // consecutive steady readings so far
+  gyroSamples: 0,        // readings since (re)centring
   gyroLive: false,
 };
 let gyroToken = 0;
@@ -438,7 +441,7 @@ function setLookTarget(yaw, pitch) {
 
 function resetLook(instant) {
   setLookTarget(0, 0);
-  look.gyroBase = null;
+  resetGyroBaseline();
   if (instant) { look.yaw = 0; look.pitch = 0; }
 }
 
@@ -473,19 +476,48 @@ const devFix = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
 const zAxis = new THREE.Vector3(0, 0, 1);
 const D2R = THREE.MathUtils.DEG2RAD;
 
+const devLook = new THREE.Euler(0, 0, 0, 'YXZ');
+// Sensors often send a few unsettled readings right after they start (notably on iOS after the
+// permission prompt). Taking "straight ahead" from one of those made the view swing off on its own.
+const GYRO_STEADY = 1.5 * D2R;      // readings closer than this count as steady
+const GYRO_SETTLE = 4;              // steady readings in a row before the baseline is taken
+const GYRO_SETTLE_MAX = 30;         // ...but never wait longer than this many readings
+const GYRO_GLITCH = 20 * D2R;       // a jump this large between two readings is a sensor reset, not a hand
+
+function resetGyroBaseline() {
+  look.gyroBase = null;
+  look.gyroPrev = null;
+  look.gyroSteady = 0;
+  look.gyroSamples = 0;
+}
+
 function onOrientation(e) {
   if (e.alpha == null || e.beta == null || e.gamma == null) return;
   look.gyroLive = true;
-  if (look.mode !== 'gyro' || state.shot < 0 || body.classList.contains('flying')) { look.gyroBase = null; return; }
+  if (look.mode !== 'gyro' || state.shot < 0 || body.classList.contains('flying')) { resetGyroBaseline(); return; }
   const orient = (screen.orientation?.angle ?? window.orientation ?? 0) * D2R;
   devEuler.set(e.beta * D2R, e.alpha * D2R, -e.gamma * D2R, 'YXZ');
   devQuat.setFromEuler(devEuler).multiply(devFix).multiply(devTmp.setFromAxisAngle(zAxis, -orient));
-  lookEuler.setFromQuaternion(devQuat, 'YXZ');
+  devLook.setFromQuaternion(devQuat, 'YXZ');
+  const yaw = devLook.y, pitch = devLook.x;
+  const prev = look.gyroPrev;
+  look.gyroPrev = { yaw, pitch };
+  const dYaw = prev ? wrapAngle(yaw - prev.yaw) : 0;
+  const dPitch = prev ? pitch - prev.pitch : 0;
+
   if (!look.gyroBase) {
-    look.gyroBase = { yaw: lookEuler.y, pitch: lookEuler.x, fromYaw: look.targetYaw, fromPitch: look.targetPitch };
+    look.gyroSamples++;
+    const steady = prev && Math.abs(dYaw) < GYRO_STEADY && Math.abs(dPitch) < GYRO_STEADY;
+    look.gyroSteady = steady ? look.gyroSteady + 1 : 0;
+    if (look.gyroSteady < GYRO_SETTLE && look.gyroSamples < GYRO_SETTLE_MAX) return;
+    look.gyroBase = { yaw, pitch, fromYaw: look.targetYaw, fromPitch: look.targetPitch };
+  } else if (Math.abs(dYaw) > GYRO_GLITCH || Math.abs(dPitch) > GYRO_GLITCH) {
+    // absorb the jump into the baseline so the view doesn't spin
+    look.gyroBase.yaw = wrapAngle(look.gyroBase.yaw + dYaw);
+    look.gyroBase.pitch += dPitch;
   }
   const b = look.gyroBase;
-  setLookTarget(b.fromYaw + wrapAngle(lookEuler.y - b.yaw), b.fromPitch + (lookEuler.x - b.pitch));
+  setLookTarget(b.fromYaw + wrapAngle(yaw - b.yaw), b.fromPitch + (pitch - b.pitch));
 }
 
 async function startGyro() {
@@ -500,7 +532,7 @@ async function startGyro() {
     if (answer !== 'granted') return fail('Motion access was not allowed. Using drag instead.');
   }
   if (token !== gyroToken) return;
-  look.gyroBase = null;
+  resetGyroBaseline();
   look.gyroLive = false;
   window.addEventListener('deviceorientation', onOrientation);
   setLookNote('Move your phone to look around');
@@ -527,7 +559,10 @@ ui.lookBtns.forEach((b) => b.addEventListener('click', () => {
   const mode = b.dataset.look;
   if (mode === look.mode) return;
   setLookMode(mode);
-  if (mode === 'gyro') startGyro();
+  if (mode === 'gyro') {
+    resetLook(false);   // start from the photo's framing, not wherever a drag left the view
+    startGyro();
+  }
 }));
 $('#look-recenter').addEventListener('click', () => resetLook(false));
 
@@ -786,3 +821,4 @@ renderer.setAnimationLoop((now) => {
   }
   renderer.render(scene, camera);
 });
+window.__look = look;
