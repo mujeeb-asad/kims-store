@@ -450,8 +450,13 @@ body.model-error .status .dot { background: #e5484d; animation: none; }
 
 /* ---------- shot bar ---------- */
 .shotbar {
+  /* centred with auto margins (not left: 50%) so it can use the full width on phones */
   position: fixed;
-  left: 50%;
+  left: 0;
+  right: 0;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  margin-inline: auto;
   bottom: max(20px, env(safe-area-inset-bottom));
   z-index: 20;
   display: flex;
@@ -464,12 +469,12 @@ body.model-error .status .dot { background: #e5484d; animation: none; }
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--shadow);
-  transform: translate(-50%, 24px);
+  transform: translateY(24px);
   opacity: 0;
   pointer-events: none;
   transition: opacity .4s var(--ease), transform .4s var(--ease);
 }
-body.in-shot .shotbar { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+body.in-shot .shotbar { opacity: 1; transform: none; pointer-events: auto; }
 .nav-btn {
   display: grid;
   place-items: center;
@@ -501,7 +506,13 @@ body.in-shot .shotbar { opacity: 1; transform: translate(-50%, 0); pointer-event
 }
 .shot-count { font-family: var(--mono); font-size: 13px; color: var(--muted); }
 .shot-count b { color: var(--fg); font-weight: 500; }
-.shot-tools { display: flex; gap: 4px; }
+.shot-tools {
+  /* equal columns sized to the widest button, so all three chips share one width */
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));   /* stay equal even when space is tight */
+  gap: 4px;
+}
+.shot-tools .chip { white-space: nowrap; }
 .chip {
   border: 1px solid var(--line);
   background: transparent;
@@ -513,7 +524,7 @@ body.in-shot .shotbar { opacity: 1; transform: translate(-50%, 0); pointer-event
 }
 .chip:hover { color: var(--fg); border-color: var(--fg); }
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #121212; }
-.chip-nav { display: inline-flex; align-items: center; gap: 4px; }
+.chip-nav { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .chip-nav .i-unlocked, .chip-nav[aria-pressed="true"] .i-locked { display: none; }
 .chip-nav[aria-pressed="true"] .i-unlocked { display: block; }
 
@@ -638,6 +649,15 @@ body.hovering-marker #scene { cursor: pointer; }
   .shot-meta { min-width: 120px; }
   .look-label { display: none; }
   .hint { font-size: 10.5px; white-space: normal; text-align: center; width: calc(100% - 32px); }
+}
+
+/* very small phones: trim the arrows and chip padding so equal-width chips still fit */
+@media (max-width: 400px) {
+  .nav-btn { width: 44px; height: 44px; }
+  .shot-tools .chip { padding-left: 7px; padding-right: 7px; }
+}
+@media (max-width: 340px) {
+  .shot-tools .chip { font-size: 10.5px; padding-left: 5px; padding-right: 5px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
