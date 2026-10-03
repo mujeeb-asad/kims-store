@@ -202,29 +202,40 @@ body:not([data-view="welcome"]) .repr-wrap { opacity: 1; transform: translate(-5
   background: var(--bg-elev);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  transition: background-color .15s var(--ease) .8s, border-color .15s var(--ease) .8s;
 }
 
-/* One-time label drawer: slides out from behind the switch, holds, then tucks back in.
+/* One-time label drawer. While open, the drawer and the switch read as one rounded shape:
+   the drawer spans the switch too and the switch's own outline fades out, so there is no
+   pinch where they meet. Closed, the drawer is clipped to exactly the switch's 40px capsule.
    Opening: banner 0.5s, text fades in as it lands. Closing: text fades first, then the banner. */
 .repr-drawer {
   position: absolute;
   top: 0;
-  right: 50%;
+  right: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 2px;
-  padding: 3px 30px 3px 14px;
+  padding: 3px 48px 3px 16px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 20px;
   background: var(--bg-elev);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: var(--shadow);
   pointer-events: none;
-  clip-path: inset(0 0 0 100% round 18px);
-  transition: clip-path .55s var(--ease) .25s;
+  visibility: hidden;
+  clip-path: inset(0 0 0 calc(100% - 40px) round 20px);
+  transition: clip-path .55s var(--ease) .25s, visibility 0s linear .95s;
+}
+.repr-wrap.labels-open .repr {
+  background-color: transparent;
+  border-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease);
 }
 .repr-drawer span {
   height: 32px;
@@ -239,8 +250,9 @@ body:not([data-view="welcome"]) .repr-wrap { opacity: 1; transform: translate(-5
   transition: opacity .25s var(--ease), transform .25s var(--ease);
 }
 .repr-wrap.labels-open .repr-drawer {
-  clip-path: inset(0 0 0 0 round 18px);
-  transition: clip-path .5s var(--ease);
+  visibility: visible;
+  clip-path: inset(0 0 0 0 round 20px);
+  transition: clip-path .5s var(--ease), visibility 0s;
 }
 .repr-wrap.labels-open .repr-drawer span {
   opacity: 1;
@@ -469,8 +481,16 @@ body.in-shot .shotbar { opacity: 1; transform: translate(-50%, 0); pointer-event
   transition: transform .2s var(--ease), opacity .2s;
 }
 .nav-btn:hover { transform: scale(1.06); }
-.nav-btn.is-hidden { visibility: hidden; pointer-events: none; }
 .nav-btn:active { transform: scale(.94); }
+/* first / last shot: same place, inverted colours, not clickable */
+.nav-btn:disabled {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: default;
+  transform: none;
+}
+.nav-btn:disabled svg { opacity: .4; }
 .shot-meta {
   display: flex;
   flex-direction: column;

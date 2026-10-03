@@ -383,8 +383,8 @@ async function goToShot(i) {
   markerGroup.visible = false;
   setHover(-1);
   ui.shotNum.textContent = pad(i + 1);
-  ui.prev.classList.toggle('is-hidden', i === 0);
-  ui.next.classList.toggle('is-hidden', i === N - 1);
+  ui.prev.disabled = i === 0;
+  ui.next.disabled = i === N - 1;
   resetLook(true);
   hidePhoto();
 
