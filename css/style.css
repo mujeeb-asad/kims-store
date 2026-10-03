@@ -180,10 +180,19 @@ body:not([data-view="welcome"]) .modes { opacity: 1; transform: none; pointer-ev
 
 /* ---------- mesh / points switch (sits under the theme button) ---------- */
 .top-right { position: relative; }
-.repr {
+.repr-wrap {
   position: absolute;
   top: calc(100% + 10px);
   left: 50%;
+  opacity: 0;
+  transform: translate(-50%, -6px);
+  pointer-events: none;
+  transition: opacity .4s var(--ease), transform .4s var(--ease);
+}
+body:not([data-view="welcome"]) .repr-wrap { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.repr {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -193,12 +202,52 @@ body:not([data-view="welcome"]) .modes { opacity: 1; transform: none; pointer-ev
   background: var(--bg-elev);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  opacity: 0;
-  transform: translate(-50%, -6px);
-  pointer-events: none;
-  transition: opacity .4s var(--ease), transform .4s var(--ease);
 }
-body:not([data-view="welcome"]) .repr { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+
+/* One-time label drawer: slides out from behind the switch, holds, then tucks back in.
+   Opening: banner 0.5s, text fades in as it lands. Closing: text fades first, then the banner. */
+.repr-drawer {
+  position: absolute;
+  top: 0;
+  right: 50%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px 30px 3px 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--bg-elev);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  clip-path: inset(0 0 0 100% round 18px);
+  transition: clip-path .55s var(--ease) .25s;
+}
+.repr-drawer span {
+  height: 32px;
+  line-height: 32px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--muted);
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity .25s var(--ease), transform .25s var(--ease);
+}
+.repr-wrap.labels-open .repr-drawer {
+  clip-path: inset(0 0 0 0 round 18px);
+  transition: clip-path .5s var(--ease);
+}
+.repr-wrap.labels-open .repr-drawer span {
+  opacity: 1;
+  transform: none;
+  transition: opacity .35s var(--ease) .3s, transform .35s var(--ease) .3s;
+}
+.repr-wrap .repr-drawer span.current { color: var(--fg); }
 .repr-btn {
   position: relative;
   display: grid;
@@ -444,9 +493,9 @@ body.in-shot .shotbar { opacity: 1; transform: translate(-50%, 0); pointer-event
 }
 .chip:hover { color: var(--fg); border-color: var(--fg); }
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #121212; }
-.chip-icon { display: inline-grid; place-items: center; padding: 3px 8px; }
-.chip-icon .i-unlocked, .chip-icon[aria-pressed="true"] .i-locked { display: none; }
-.chip-icon[aria-pressed="true"] .i-unlocked { display: block; }
+.chip-nav { display: inline-flex; align-items: center; gap: 4px; }
+.chip-nav .i-unlocked, .chip-nav[aria-pressed="true"] .i-locked { display: none; }
+.chip-nav[aria-pressed="true"] .i-unlocked { display: block; }
 
 /* ---------- look-around menu ---------- */
 .look-menu {

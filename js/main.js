@@ -25,6 +25,8 @@ const ui = {
   retroLine: $('#retro-line'),
   retroHead: $('#retro-head'),
   reprBtns: [...document.querySelectorAll('.repr-btn')],
+  reprWrap: $('#repr-wrap'),
+  reprLabels: [...document.querySelectorAll('.repr-drawer span')],
   shotNum: $('#shot-num'),
   prev: $('#prev'),
   next: $('#next'),
@@ -394,6 +396,7 @@ async function goToShot(i) {
   const s = shots[i];
   const arrived = await flyTo(s.position, s.quaternion, shotFov());
   if (!arrived) return;
+  showReprLabels(1000);
   const tex = await texPromise;
   if (tex && state.shot === i && !body.classList.contains('flying')) showPhoto(i, tex);
 }
@@ -412,6 +415,7 @@ async function enterOverview() {
   controls.target.copy(target);
   controls.enabled = true;
   controls.update();
+  showReprLabels(0);
 }
 
 function enterTour() {
@@ -946,6 +950,20 @@ async function setRepresentation(mode) {
 }
 
 ui.reprBtns.forEach((b) => b.addEventListener('click', () => setRepresentation(b.dataset.repr)));
+
+// Once per visit, when the camera first settles, slide the full names out next to the
+// Mesh / Points icons, hold them, then tuck them back in (timings live in the CSS).
+const REPR_LABELS_HOLD = 2800;   // open -> start closing, ms
+let reprLabelsShown = false;
+function showReprLabels(delay) {
+  if (reprLabelsShown) return;
+  reprLabelsShown = true;
+  setTimeout(() => {
+    ui.reprLabels.forEach((l) => l.classList.toggle('current', l.dataset.for === repr.wanted));
+    ui.reprWrap.classList.add('labels-open');
+    setTimeout(() => ui.reprWrap.classList.remove('labels-open'), REPR_LABELS_HOLD);
+  }, delay);
+}
 
 /* ------------------------------------------------------------------ loop */
 

@@ -50,13 +50,19 @@
       </button>
 
       <!-- what the store is drawn with: the textured mesh or the dense point cloud -->
-      <div class="repr" role="radiogroup" aria-label="Show the store as">
-        <button class="repr-btn active" data-repr="mesh" type="button" role="radio" aria-checked="true" aria-label="Mesh" data-label="Mesh">
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z"/><path d="M4 7.4 12 12l8-4.6M12 12v9.2"/></svg>
-        </button>
-        <button class="repr-btn" data-repr="points" type="button" role="radio" aria-checked="false" aria-label="Point cloud" data-label="Points">
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="7" r="1.6"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="11" r="1.7"/><circle cx="17.5" cy="12.5" r="1.3"/><circle cx="7" cy="18" r="1.6"/><circle cx="13" cy="17.5" r="1.3"/><circle cx="18.5" cy="18" r="1.6"/></svg>
-        </button>
+      <div class="repr-wrap" id="repr-wrap">
+        <div class="repr-drawer" aria-hidden="true">
+          <span data-for="mesh">Mesh</span>
+          <span data-for="points">Point cloud</span>
+        </div>
+        <div class="repr" role="radiogroup" aria-label="Show the store as">
+          <button class="repr-btn active" data-repr="mesh" type="button" role="radio" aria-checked="true" aria-label="Mesh" data-label="Mesh">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z"/><path d="M4 7.4 12 12l8-4.6M12 12v9.2"/></svg>
+          </button>
+          <button class="repr-btn" data-repr="points" type="button" role="radio" aria-checked="false" aria-label="Point cloud" data-label="Points">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="7" r="1.6"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="11" r="1.7"/><circle cx="17.5" cy="12.5" r="1.3"/><circle cx="7" cy="18" r="1.6"/><circle cx="13" cy="17.5" r="1.3"/><circle cx="18.5" cy="18" r="1.6"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </header>
@@ -102,7 +108,8 @@
       <span class="shot-tools">
         <button class="chip" id="compare" type="button" aria-pressed="false" title="Fade the photo to check the fit (C)">Compare</button>
         <button class="chip" id="exit-shot" type="button" title="Back to overview (Esc)">Overview</button>
-        <button class="chip chip-icon" id="look-lock" type="button" aria-pressed="false" aria-label="Unlock the camera to look around" title="Unlock the camera to look around (L)">
+        <button class="chip chip-nav" id="look-lock" type="button" aria-pressed="false" aria-label="Unlock the camera to look around" title="Unlock the camera to look around (L)">
+          <span>Nav</span>
           <svg class="i-locked" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
           <svg class="i-unlocked" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></svg>
         </button>
