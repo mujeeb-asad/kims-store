@@ -22,6 +22,9 @@ const ui = {
   shotNum: $('#shot-num'),
   prev: $('#prev'),
   next: $('#next'),
+  lookLock: $('#look-lock'),
+  lookNote: $('#look-note'),
+  lookBtns: [...document.querySelectorAll('.seg-btn')],
   shotTotal: $('#shot-total'),
   compare: $('#compare'),
   tooltip: $('#tooltip'),
@@ -374,6 +377,7 @@ async function goToShot(i) {
   ui.shotNum.textContent = pad(i + 1);
   ui.prev.classList.toggle('is-hidden', i === 0);
   ui.next.classList.toggle('is-hidden', i === N - 1);
+  resetLook(true);
   hidePhoto();
 
   const texPromise = photoTexture(i);
@@ -392,6 +396,8 @@ async function enterOverview() {
   setView('overview');
   state.shot = -1;
   body.classList.remove('in-shot');
+  setLookMode('locked');
+  resetLook(true);
   hidePhoto();
   markerGroup.visible = true;
   const { pos, target } = state.lastOverview || defaultOverview();
@@ -406,6 +412,124 @@ function enterTour() {
   setView('tour');
   goToShot(state.shot >= 0 ? state.shot : state.lastShot);
 }
+
+/* ------------------------------------------------------------------ look-around */
+
+// While unlocked, the camera stays on the shot's position and only turns, so the photo
+// stays pinned where it belongs and the mesh continues past its edges.
+const LOOK_MAX_YAW = THREE.MathUtils.degToRad(100);
+const LOOK_MAX_PITCH = THREE.MathUtils.degToRad(55);
+const look = {
+  mode: 'locked',        // locked | drag | gyro
+  yaw: 0, pitch: 0,      // current offsets from the shot's framing (radians)
+  targetYaw: 0, targetPitch: 0,
+  gyroBase: null,        // device yaw/pitch when gyro was (re)centred
+  gyroLive: false,
+};
+let gyroToken = 0;
+const lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const lookRot = new THREE.Quaternion();
+const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+function setLookTarget(yaw, pitch) {
+  look.targetYaw = clamp(yaw, -LOOK_MAX_YAW, LOOK_MAX_YAW);
+  look.targetPitch = clamp(pitch, -LOOK_MAX_PITCH, LOOK_MAX_PITCH);
+}
+
+function resetLook(instant) {
+  setLookTarget(0, 0);
+  look.gyroBase = null;
+  if (instant) { look.yaw = 0; look.pitch = 0; }
+}
+
+function setLookNote(text, warn = false) {
+  ui.lookNote.textContent = text;
+  ui.lookNote.classList.toggle('warn', warn);
+}
+
+function setLookMode(mode) {
+  if (mode !== 'gyro') stopGyro();
+  look.mode = mode;
+  const unlocked = mode !== 'locked';
+  body.classList.toggle('look-unlocked', unlocked);
+  body.classList.toggle('look-drag', mode === 'drag');
+  ui.lookLock.setAttribute('aria-pressed', String(unlocked));
+  ui.lookLock.title = unlocked ? 'Lock the camera back to the photo (L)' : 'Unlock the camera to look around (L)';
+  ui.lookBtns.forEach((b) => {
+    const on = b.dataset.look === mode;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-checked', String(on));
+  });
+  if (!unlocked) resetLook(false);
+  if (mode === 'drag') setLookNote('Drag to look around');
+}
+
+// three.js camera orientation from DeviceOrientation angles (same maths as the old
+// DeviceOrientationControls): camera looks out of the back of the phone, world Y up.
+const devEuler = new THREE.Euler();
+const devQuat = new THREE.Quaternion();
+const devTmp = new THREE.Quaternion();
+const devFix = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+const zAxis = new THREE.Vector3(0, 0, 1);
+const D2R = THREE.MathUtils.DEG2RAD;
+
+function onOrientation(e) {
+  if (e.alpha == null || e.beta == null || e.gamma == null) return;
+  look.gyroLive = true;
+  if (look.mode !== 'gyro' || state.shot < 0 || body.classList.contains('flying')) { look.gyroBase = null; return; }
+  const orient = (screen.orientation?.angle ?? window.orientation ?? 0) * D2R;
+  devEuler.set(e.beta * D2R, e.alpha * D2R, -e.gamma * D2R, 'YXZ');
+  devQuat.setFromEuler(devEuler).multiply(devFix).multiply(devTmp.setFromAxisAngle(zAxis, -orient));
+  lookEuler.setFromQuaternion(devQuat, 'YXZ');
+  if (!look.gyroBase) {
+    look.gyroBase = { yaw: lookEuler.y, pitch: lookEuler.x, fromYaw: look.targetYaw, fromPitch: look.targetPitch };
+  }
+  const b = look.gyroBase;
+  setLookTarget(b.fromYaw + wrapAngle(lookEuler.y - b.yaw), b.fromPitch + (lookEuler.x - b.pitch));
+}
+
+async function startGyro() {
+  const token = ++gyroToken;
+  const fail = (msg) => { if (token !== gyroToken) return; setLookMode('drag'); setLookNote(msg, true); };
+  if (!('DeviceOrientationEvent' in window)) return fail('This browser has no motion sensor access. Using drag instead.');
+  if (!window.isSecureContext) return fail('Gyro needs the https version of the site. Using drag instead.');
+  // iOS 13+: must be asked from the tap itself, which is why this runs straight from the click handler
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    let answer = 'denied';
+    try { answer = await DeviceOrientationEvent.requestPermission(); } catch (err) { /* treated as denied */ }
+    if (answer !== 'granted') return fail('Motion access was not allowed. Using drag instead.');
+  }
+  if (token !== gyroToken) return;
+  look.gyroBase = null;
+  look.gyroLive = false;
+  window.addEventListener('deviceorientation', onOrientation);
+  setLookNote('Move your phone to look around');
+  setTimeout(() => {
+    if (token === gyroToken && look.mode === 'gyro' && !look.gyroLive) fail('No motion sensor found on this device. Using drag instead.');
+  }, 1500);
+}
+
+function stopGyro() {
+  gyroToken++;
+  window.removeEventListener('deviceorientation', onOrientation);
+}
+
+function applyLook(dt) {
+  const k = 1 - Math.exp(-dt * (look.mode === 'gyro' ? 12 : 16));
+  look.yaw += (look.targetYaw - look.yaw) * k;
+  look.pitch += (look.targetPitch - look.pitch) * k;
+  lookEuler.set(look.pitch, look.yaw, 0, 'YXZ');
+  camera.quaternion.copy(shots[state.shot].quaternion).multiply(lookRot.setFromEuler(lookEuler));
+}
+
+ui.lookLock.addEventListener('click', () => setLookMode(look.mode === 'locked' ? 'drag' : 'locked'));
+ui.lookBtns.forEach((b) => b.addEventListener('click', () => {
+  const mode = b.dataset.look;
+  if (mode === look.mode) return;
+  setLookMode(mode);
+  if (mode === 'gyro') startGyro();
+}));
+$('#look-recenter').addEventListener('click', () => resetLook(false));
 
 /* ------------------------------------------------------------------ view + mode switch */
 
@@ -446,6 +570,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowLeft') { inShot ? goToShot(state.shot - 1) : (setView('tour'), goToShot(state.lastShot)); }
   else if (e.key === 'Escape' && inShot) enterOverview();
   else if ((e.key === 'c' || e.key === 'C') && inShot) setCompare(!state.compare);
+  else if ((e.key === 'l' || e.key === 'L') && inShot) setLookMode(look.mode === 'locked' ? 'drag' : 'locked');
   else return;
   e.preventDefault();
 });
@@ -502,17 +627,32 @@ function setHover(i, x, y) {
 const interactive = () => state.ready && state.view !== 'welcome';
 let down = null;
 
+const lookDragging = () => state.shot >= 0 && look.mode === 'drag' && !body.classList.contains('flying');
+
 canvas.addEventListener('pointermove', (e) => {
+  if (down && lookDragging()) {
+    // grab-the-world: the scene follows the finger, at roughly one screen per field of view
+    const k = THREE.MathUtils.degToRad(camera.fov) / window.innerHeight;
+    setLookTarget(look.targetYaw + (e.clientX - down.lx) * k, look.targetPitch + (e.clientY - down.ly) * k);
+    down.lx = e.clientX; down.ly = e.clientY;
+    return;
+  }
   if (!interactive() || e.pointerType !== 'mouse' || down || state.shot >= 0) return;
   setHover(pickAt(e.clientX, e.clientY), e.clientX, e.clientY);
 });
 canvas.addEventListener('pointerleave', () => setHover(-1));
-canvas.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+canvas.addEventListener('pointerdown', (e) => {
+  down = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, t: performance.now() };
+  if (lookDragging()) { canvas.setPointerCapture(e.pointerId); body.classList.add('dragging'); }
+});
+canvas.addEventListener('pointercancel', () => { down = null; body.classList.remove('dragging'); });
 canvas.addEventListener('pointerup', (e) => {
   const d = down; down = null;
+  body.classList.remove('dragging');
   if (!d || !interactive()) return;
   const dx = e.clientX - d.x, dy = e.clientY - d.y, dt = performance.now() - d.t;
   if (state.shot >= 0) {
+    if (look.mode === 'drag') return;   // dragging looks around instead of changing shots
     // swipe between shots
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < 800) goToShot(state.shot + (dx < 0 ? 1 : -1));
     return;
@@ -639,6 +779,8 @@ renderer.setAnimationLoop((now) => {
     const w = welcomePose(welcomeT);
     camera.position.copy(w.pos);
     camera.quaternion.copy(w.quat);
+  } else if (state.shot >= 0 && !body.classList.contains('flying')) {
+    applyLook(dt);
   } else if (controls.enabled) {
     controls.update();
   }
