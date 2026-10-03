@@ -4,6 +4,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 const MODEL_URL = 'assets/kims.glb';
+const POINTS_URL = 'assets/points.glb';                  // dense cloud, ~1.3M points
+const POINTS_PREVIEW_URL = 'assets/points-preview.glb';  // coarse version shown while the full one loads
+const POINT_SIZE = 0.045;   // world units; a bit above the ~3 cm spacing so close surfaces read solid
+const POINT_MIN_PX = 1.5;   // keep far-away points visible in the overview
 const CAMERAS_URL = 'assets/cameras.json';
 const OVERVIEW_FOV = 45;
 const PHOTO_DEPTH = 1;       // the photo plane sits this far in front of its camera
@@ -19,6 +23,8 @@ const ui = {
   retroPct: $('#retro-pct'),
   retroBytes: $('#retro-bytes'),
   retroLine: $('#retro-line'),
+  retroHead: $('#retro-head'),
+  reprBtns: [...document.querySelectorAll('.repr-btn')],
   shotNum: $('#shot-num'),
   prev: $('#prev'),
   next: $('#next'),
@@ -606,6 +612,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'Escape' && inShot) enterOverview();
   else if ((e.key === 'c' || e.key === 'C') && inShot) setCompare(!state.compare);
   else if ((e.key === 'l' || e.key === 'L') && inShot) setLookMode(look.mode === 'locked' ? 'drag' : 'locked');
+  else if (e.key === 'p' || e.key === 'P') setRepresentation(repr.wanted === 'mesh' ? 'points' : 'mesh');
   else return;
   e.preventDefault();
 });
@@ -717,13 +724,28 @@ function hideRetro() {
   }, wait));
 }
 
-function setProgress(p, loaded) {
+function resetRetro(head, line) {
+  ui.retroHead.textContent = head;
+  ui.retroLine.textContent = line;
+  ui.retroBar.textContent = `[${'.'.repeat(20)}]`;
+  ui.retroPct.textContent = '00%';
+  ui.retroBytes.textContent = '';
+}
+
+function setRetroProgress(p, loaded) {
   const pct = Math.round(p * 100);
   const filled = Math.round(p * 20);
   ui.retroBar.textContent = `[${'#'.repeat(filled)}${'.'.repeat(20 - filled)}]`;
   ui.retroPct.textContent = `${pad(Math.min(pct, 99))}%`;
   if (loaded) ui.retroBytes.textContent = `${(loaded / 1e6).toFixed(1)} MB`;
-  ui.status.textContent = `Building the store in the background · ${pct}%`;
+}
+
+// hosts that gzip on the fly don't send a usable length; ease towards 95% instead
+const progressOf = (xhr, typical) => (xhr.lengthComputable && xhr.total ? xhr.loaded / xhr.total : 0.95 * (1 - Math.exp(-xhr.loaded / typical)));
+
+function setProgress(p, loaded) {
+  setRetroProgress(p, loaded);
+  ui.status.textContent = `Building the store in the background · ${Math.round(p * 100)}%`;
 }
 
 function welcomePose(t) {
@@ -733,6 +755,8 @@ function welcomePose(t) {
   const p = storeCenter.clone().add(off.multiplyScalar(0.9));
   return { pos: p, quat: lookQuat(p, storeCenter) };
 }
+
+const meshMaterials = [];   // faded out/in when switching to the point cloud
 
 function onModelLoaded(gltf) {
   ui.retroLine.textContent = '> uploading textures';
@@ -745,6 +769,7 @@ function onModelLoaded(gltf) {
     const old = o.material;
     if (old.map) { old.map.anisotropy = maxAniso; renderer.initTexture(old.map); }
     o.material = new THREE.MeshBasicMaterial({ map: old.map, side: THREE.FrontSide });
+    meshMaterials.push(o.material);
     old.dispose();
   });
   modelRoot.add(model);
@@ -765,6 +790,7 @@ function onModelLoaded(gltf) {
     camera.position.copy(w.pos); camera.quaternion.copy(w.quat);
     hideRetro().then(pending);
   }
+  prefetchPointsWhenIdle();
 }
 
 function onModelError(err) {
@@ -778,11 +804,148 @@ function onModelError(err) {
 const gltfLoader = new GLTFLoader();
 gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 gltfLoader.load(MODEL_URL, onModelLoaded, (xhr) => {
-  // hosts that gzip on the fly don't send a usable length; ease towards 95% instead
-  const p = xhr.lengthComputable && xhr.total ? xhr.loaded / xhr.total : 0.95 * (1 - Math.exp(-xhr.loaded / 4e6));
+  const p = progressOf(xhr, 4e6);
   setProgress(Math.min(p, 0.99), xhr.loaded);
   if (p >= 0.99) ui.retroLine.textContent = '> decoding geometry';
 }, onModelError);
+
+/* ------------------------------------------------------------------ point cloud */
+
+// The dense cloud is its own view of the store, not an overlay: the switch crossfades between
+// mesh and points and never touches the camera, so a locked shot, an orbit or a look-around
+// carries straight over. A coarse preview loads first; the full cloud replaces it quietly.
+const pointsRoot = new THREE.Group();
+pointsRoot.visible = false;
+scene.add(pointsRoot);
+
+const pointsMat = new THREE.PointsMaterial({ size: POINT_SIZE, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0 });
+pointsMat.onBeforeCompile = (shader) => {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <color_vertex>', `#include <color_vertex>
+      // Metashape writes sRGB colours but glTF vertex colours are linear; decode them here,
+      // otherwise the output conversion brightens them a second time (the washed-out look).
+      vColor.rgb = mix(vColor.rgb / 12.92, pow((vColor.rgb + 0.055) / 1.055, vec3(2.4)), step(0.04045, vColor.rgb));`)
+    .replace('#include <logdepthbuf_vertex>', `gl_PointSize = max(gl_PointSize, ${POINT_MIN_PX.toFixed(1)});
+      #include <logdepthbuf_vertex>`);
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+      vec2 pc = gl_PointCoord - 0.5;
+      if (dot(pc, pc) > 0.25) discard;   // round dots instead of squares`);
+};
+
+const points = { level: 0, onProgress: null };   // level: 0 none, 1 preview, 2 full
+let pointsPromise = null;
+
+const loadGLB = (url, onProgress) => new Promise((resolve, reject) => gltfLoader.load(url, resolve, onProgress, reject));
+
+function adoptPoints(gltf, level) {
+  if (level <= points.level) return;
+  gltf.scene.traverse((o) => {
+    if (o.isPoints) { o.material.dispose(); o.material = pointsMat; }
+  });
+  const old = [...pointsRoot.children];
+  pointsRoot.add(gltf.scene);
+  old.forEach((o) => { pointsRoot.remove(o); o.traverse((c) => c.geometry?.dispose()); });
+  points.level = level;
+}
+
+// Resolves once something is showable (the preview); the full cloud follows in the background.
+function ensurePoints() {
+  if (!pointsPromise) {
+    pointsPromise = loadGLB(POINTS_PREVIEW_URL, (xhr) => points.onProgress?.(xhr)).then((g) => {
+      adoptPoints(g, 1);
+      loadGLB(POINTS_URL).then((f) => adoptPoints(f, 2)).catch((err) => console.warn('Full point cloud failed to load', err));
+    });
+    pointsPromise.catch(() => { pointsPromise = null; });   // let a later switch retry
+  }
+  return pointsPromise;
+}
+
+// Fetch the cloud once the visitor has settled in, so the switch is usually instant.
+// Skipped on data saver or very slow connections; those visitors load it only on demand.
+function prefetchPointsWhenIdle() {
+  const c = navigator.connection;
+  if (c && (c.saveData || /2g$/.test(c.effectiveType || ''))) return;
+  const go = () => ensurePoints().catch(() => {});
+  setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(go, { timeout: 5000 }) : go()), 5000);
+}
+
+const repr = { current: 'mesh', wanted: 'mesh', tween: null };
+
+function setReprUI(mode, loading = false) {
+  ui.reprBtns.forEach((b) => {
+    const on = b.dataset.repr === mode;
+    b.classList.toggle('active', on);
+    b.classList.toggle('loading', on && loading);
+    b.setAttribute('aria-checked', String(on));
+  });
+}
+
+function crossfadeTo(mode) {
+  if (mode === repr.current) return;
+  repr.current = mode;
+  const toPoints = mode === 'points';
+  repr.tween?.cancel();
+  [...meshMaterials, pointsMat].forEach((m) => { if (!m.transparent) { m.transparent = true; m.needsUpdate = true; } });
+  modelRoot.visible = true;
+  pointsRoot.visible = true;
+  const m0 = meshMaterials[0]?.opacity ?? 1, p0 = pointsMat.opacity;
+  const m1 = toPoints ? 0 : 1, p1 = toPoints ? 1 : 0;
+  repr.tween = tween(650, (e) => {
+    meshMaterials.forEach((m) => { m.opacity = m0 + (m1 - m0) * e; });
+    pointsMat.opacity = p0 + (p1 - p0) * e;
+  });
+  repr.tween.then((done) => {
+    if (!done) return;
+    modelRoot.visible = !toPoints;
+    pointsRoot.visible = toPoints;
+    (toPoints ? [pointsMat] : meshMaterials).forEach((m) => { m.transparent = false; m.needsUpdate = true; });
+  });
+}
+
+async function setRepresentation(mode) {
+  if (!state.ready || mode === repr.wanted) return;
+  repr.wanted = mode;
+  setReprUI(mode);
+  if (mode === 'mesh') {
+    if (!ui.retro.hidden) hideRetro();   // changed their mind while the points were loading
+    crossfadeTo('mesh');
+    return;
+  }
+  if (points.level === 0) {
+    // first time: keep the mesh up and usable, float the retro loader while the points arrive
+    setReprUI('points', true);
+    resetRetro('SCATTERING POINTS', '> fetching point cloud');
+    points.onProgress = (xhr) => {
+      const p = progressOf(xhr, 1e6);
+      setRetroProgress(Math.min(p, 0.99), xhr.loaded);
+      if (p >= 0.99) ui.retroLine.textContent = '> decoding points';
+    };
+    showRetro();
+    try {
+      await ensurePoints();
+    } catch (err) {
+      console.error(err);
+      ui.retroLine.textContent = '> ERROR: point cloud failed to load';
+      ui.retroBar.textContent = `[${'!'.repeat(20)}]`;
+      setTimeout(hideRetro, 1600);
+      if (repr.wanted === 'points') { repr.wanted = 'mesh'; setReprUI('mesh'); }
+      return;
+    } finally {
+      points.onProgress = null;
+    }
+    if (repr.wanted !== 'points') return;
+    setRetroProgress(1);
+    ui.retroPct.textContent = '100%';
+    ui.retroLine.textContent = '> ready. switching view';
+    setReprUI('points');
+    await hideRetro();
+    if (repr.wanted !== 'points') return;
+  }
+  crossfadeTo('points');
+}
+
+ui.reprBtns.forEach((b) => b.addEventListener('click', () => setRepresentation(b.dataset.repr)));
 
 /* ------------------------------------------------------------------ loop */
 
