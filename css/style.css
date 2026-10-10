@@ -415,11 +415,12 @@ body.model-error .status .dot { background: #e5484d; animation: none; }
   image-rendering: pixelated;
   position: relative;
   overflow: hidden;
-  animation: retro-in .35s steps(5) both, bob 3s ease-in-out .35s infinite;
+  animation: retro-in .4s var(--ease) both, bob 3s ease-in-out .4s infinite;
 }
-.retro.leaving .retro-win { animation: retro-out .35s steps(5) both; }
-@keyframes retro-in { from { transform: scale(.6); opacity: 0; } }
-@keyframes retro-out { to { transform: scale(.6); opacity: 0; } }
+.retro.leaving .retro-win { animation: retro-out .3s ease-in both; }
+/* smooth pop: a slight scale-and-rise (the chunky stepped version read as stutter) */
+@keyframes retro-in { from { transform: translateY(8px) scale(.94); opacity: 0; } }
+@keyframes retro-out { to { transform: translateY(6px) scale(.96); opacity: 0; } }
 @keyframes bob { 50% { transform: translateY(-6px); } }
 .retro-win::after {
   /* scanlines */
@@ -466,7 +467,8 @@ body.model-error .status .dot { background: #e5484d; animation: none; }
   width: 100%;
   height: 100%;
   overflow: visible;
-  animation: help-fade .3s steps(4) both;
+  animation: help-fade .35s var(--ease) both;
+  transition: opacity .22s ease-in;
 }
 .help-lines .group { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 5 4; shape-rendering: crispEdges; }
 .help-lines .link { fill: none; stroke: currentColor; stroke-width: 2; shape-rendering: crispEdges; }
@@ -488,11 +490,11 @@ body.model-error .status .dot { background: #e5484d; animation: none; }
   font-family: var(--retro);
   font-size: 19px;
   line-height: 1.1;
-  animation: retro-in .3s steps(5) both;
+  animation: retro-in .35s var(--ease) both;
 }
 .help-box[hidden] { display: none; }
 .help.compact .help-box { font-size: 17px; }
-.help.leaving .help-box { animation: retro-out .25s steps(4) both; }
+.help.leaving .help-box { animation: retro-out .24s ease-in both; }
 .help.leaving .help-lines { opacity: 0; }
 .help-box h2 {
   display: flex;
