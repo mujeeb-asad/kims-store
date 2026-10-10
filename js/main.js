@@ -1026,7 +1026,24 @@ const helpEls = {
   btn: $('#help-toggle'),
   boxes: { top: $('#help-top'), side: $('#help-side'), bottom: $('#help-bottom') },
 };
-const help = { open: false, raf: 0, content: '', geometry: '' };
+const help = { open: false, raf: 0, hideTimer: 0, text: {}, geometry: '' };
+
+// one persistent <g> per group: dashed outline, link and end cap, each over a background-coloured
+// halo so the strokes read over any photo
+helpEls.links = Object.fromEntries(Object.keys(helpEls.boxes).map((key) => {
+  const make = (tag, cls) => {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    el.setAttribute('class', cls);
+    return el;
+  };
+  const g = make('g', 'help-group');
+  const outlines = [make('rect', 'group halo'), make('rect', 'group')];
+  const lines = [make('polyline', 'link halo'), make('polyline', 'link')];
+  const caps = [make('rect', 'cap halo'), make('rect', 'cap')];
+  g.append(outlines[0], lines[0], caps[0], outlines[1], lines[1], caps[1]);
+  helpEls.svg.append(g);
+  return [key, { g, outlines, lines, caps }];
+}));
 const HELP_MARGIN = 12;   // boxes keep this far from the screen edge
 const HELP_GAP = 22;      // length of the link between a box and its group
 const HELP_PAD = 6;       // dashed outline's distance from the controls
@@ -1062,22 +1079,34 @@ function helpGroups() {
   return groups;
 }
 
-function helpTargets() {
-  const union = (els) => {
-    const r = { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity };
-    for (const el of els) {
-      // layout size around the on-screen centre: a hover rotation or press scale on a button
-      // must not make the outline (and everything placed from it) jump
-      const q = el.getBoundingClientRect();
-      const cx = (q.left + q.right) / 2, cy = (q.top + q.bottom) / 2, hw = el.offsetWidth / 2, hh = el.offsetHeight / 2;
-      r.l = Math.min(r.l, cx - hw); r.t = Math.min(r.t, cy - hh); r.r = Math.max(r.r, cx + hw); r.b = Math.max(r.b, cy + hh);
-    }
-    return { l: r.l - HELP_PAD, t: r.t - HELP_PAD, r: r.r + HELP_PAD, b: r.b + HELP_PAD };
-  };
-  const t = { top: union([$('.modes')]), side: union([$('#theme-toggle'), $('.repr'), helpEls.btn]) };
-  if (state.shot >= 0) t.bottom = union(look.mode === 'locked' ? [$('#shotbar')] : [$('#shotbar'), $('#look-menu')]);
-  else if (state.view === 'overview') t.bottom = union([$('#hint')]);
-  return t;
+// The controls each group points at. A group's box only shows while every one of them is
+// actually on screen (see helpShown), so a box never points at something still fading in.
+function helpTargetEls() {
+  const els = { top: [$('.modes')], side: [$('#theme-toggle'), $('.repr'), helpEls.btn] };
+  if (state.shot >= 0) els.bottom = look.mode === 'locked' ? [$('#shotbar')] : [$('#shotbar'), $('#look-menu')];
+  else if (state.view === 'overview') els.bottom = [$('#hint')];
+  return els;
+}
+
+// fully visible: neither the element nor any ancestor is hidden or still fading
+function helpShown(el) {
+  for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+    const cs = getComputedStyle(n);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.98) return false;
+  }
+  return true;
+}
+
+function helpRect(els) {
+  const r = { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity };
+  for (const el of els) {
+    // layout size around the on-screen centre: a hover rotation or press scale on a button
+    // must not make the outline (and everything placed from it) jump
+    const q = el.getBoundingClientRect();
+    const cx = (q.left + q.right) / 2, cy = (q.top + q.bottom) / 2, hw = el.offsetWidth / 2, hh = el.offsetHeight / 2;
+    r.l = Math.min(r.l, cx - hw); r.t = Math.min(r.t, cy - hh); r.r = Math.max(r.r, cx + hw); r.b = Math.max(r.b, cy + hh);
+  }
+  return { l: r.l - HELP_PAD, t: r.t - HELP_PAD, r: r.r + HELP_PAD, b: r.b + HELP_PAD };
 }
 
 // Straight line where the box and its group overlap along one axis; an L out of the box's
@@ -1102,66 +1131,74 @@ function helpLink(box, tgt) {
 }
 
 function layoutHelp() {
-  // 1. text: rebuild only when what is on screen changed
+  // 1. which groups can show right now, and their text
   const groups = helpGroups();
-  const content = JSON.stringify(groups);
-  if (content !== help.content) {
-    help.content = content;
-    for (const [key, box] of Object.entries(helpEls.boxes)) {
-      const g = groups[key];
-      box.hidden = !g;
-      if (!g) continue;
-      box.querySelector('.help-title').textContent = g.title;
-      box.querySelector('dl').replaceChildren(...g.rows.flatMap(([k, v]) => {
-        const dt = document.createElement('dt'), dd = document.createElement('dd');
-        dt.textContent = k; dd.textContent = v;
-        return [dt, dd];
-      }));
-    }
+  const els = helpTargetEls();
+  const live = {};
+  for (const [key, box] of Object.entries(helpEls.boxes)) {
+    const g = groups[key];
+    live[key] = Boolean(g && els[key] && els[key].every(helpShown));
+    if (!live[key]) continue;   // a box that is fading out keeps the text it had
+    const text = JSON.stringify(g);
+    if (text === help.text[key]) continue;
+    help.text[key] = text;
+    box.querySelector('.help-title').textContent = g.title;
+    box.querySelector('dl').replaceChildren(...g.rows.flatMap(([k, v]) => {
+      const dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = k; dd.textContent = v;
+      return [dt, dd];
+    }));
   }
 
   // 2. measure (all reads before any writes)
   const vw = window.innerWidth, vh = window.innerHeight;
-  const tg = helpTargets();
-  const size = {};
-  for (const [key, box] of Object.entries(helpEls.boxes)) if (!box.hidden) size[key] = { w: box.offsetWidth, h: box.offsetHeight };
-  const geometry = JSON.stringify([vw, vh, tg, size]);
+  const tg = {}, size = {};
+  for (const [key, box] of Object.entries(helpEls.boxes)) {
+    if (!live[key]) continue;
+    tg[key] = helpRect(els[key]);
+    size[key] = { w: box.offsetWidth, h: box.offsetHeight };
+  }
+  const geometry = JSON.stringify([vw, vh, live, tg, size]);
   if (geometry === help.geometry) return;
   help.geometry = geometry;
 
   // 3. place the boxes: top one under the view switch, side one left of the column, bottom one above the bar
-  const sideLimit = tg.side.l - HELP_GAP;                 // nothing may cross into the side column
-  const maxW = { top: Math.min(310, sideLimit - 14 - HELP_MARGIN), side: Math.min(300, sideLimit - HELP_MARGIN), bottom: Math.min(380, vw - 2 * HELP_MARGIN) };
+  const sideLeft = (tg.side ? tg.side.l : vw - 60) - HELP_GAP;   // nothing may cross into the side column
+  const maxW = { top: Math.min(310, sideLeft - 14 - HELP_MARGIN), side: Math.min(300, sideLeft - HELP_MARGIN), bottom: Math.min(380, vw - 2 * HELP_MARGIN) };
   const pos = {};
-  pos.top = {
-    x: clamp((tg.top.l + tg.top.r) / 2 - size.top.w / 2, HELP_MARGIN, Math.max(HELP_MARGIN, sideLimit + 8 - size.top.w)),
-    y: tg.top.b + HELP_GAP,
-  };
-  pos.side = { x: sideLimit - size.side.w, y: tg.side.t };
-  const hits = (a, aw, ah, b) => a.x < b.r + 8 && a.x + aw > b.l - 8 && a.y < b.b + 8 && a.y + ah > b.t - 8;
-  const topBox = { l: pos.top.x, t: pos.top.y, r: pos.top.x + size.top.w, b: pos.top.y + size.top.h };
-  if (hits(pos.side, size.side.w, size.side.h, tg.top) || hits(pos.side, size.side.w, size.side.h, topBox)) {
-    pos.side.y = topBox.b + 14;   // narrow screens: stack it under the first box
+  if (live.top) {
+    pos.top = {
+      x: clamp((tg.top.l + tg.top.r) / 2 - size.top.w / 2, HELP_MARGIN, Math.max(HELP_MARGIN, sideLeft + 8 - size.top.w)),
+      y: tg.top.b + HELP_GAP,
+    };
   }
-  if (size.bottom && tg.bottom) {
+  if (live.side) {
+    pos.side = { x: sideLeft - size.side.w, y: tg.side.t };
+    const hits = (b) => b && pos.side.x < b.r + 8 && pos.side.x + size.side.w > b.l - 8 && pos.side.y < b.b + 8 && pos.side.y + size.side.h > b.t - 8;
+    const topBox = pos.top && { l: pos.top.x, t: pos.top.y, r: pos.top.x + size.top.w, b: pos.top.y + size.top.h };
+    if (hits(topBox)) pos.side.y = topBox.b + 14;                 // narrow screens: stack it under the first box
+    else if (hits(tg.top)) pos.side.y = tg.top.b + HELP_GAP;
+  }
+  if (live.bottom) {
     pos.bottom = {
       x: clamp((tg.bottom.l + tg.bottom.r) / 2 - size.bottom.w / 2, HELP_MARGIN, Math.max(HELP_MARGIN, vw - HELP_MARGIN - size.bottom.w)),
       y: tg.bottom.t - HELP_GAP - size.bottom.h,
     };
     // Short screens: if the bottom box would run into the stack above it, drop the VIEW box
     // (its two buttons already say what they do) and move the side box up into its place.
-    if (pos.side.y > tg.side.t && pos.bottom.y < pos.side.y + size.side.h + 10) {
+    if (pos.top && pos.side && pos.side.y > pos.top.y && pos.bottom.y < pos.side.y + size.side.h + 10) {
       pos.side.y = pos.top.y;
-      pos.top = null;
+      delete pos.top;
     }
   }
-  helpEls.boxes.top.style.visibility = pos.top ? '' : 'hidden';   // stays measurable, so the choice is stable
 
-  // 4. write: positions, widths, then the outlines and links
+  // 4. write: each box with its outline and link, on only while its controls are on screen
   helpEls.root.classList.toggle('compact', vh < 720 || vw < 380);
-  let svg = '';
   for (const [key, box] of Object.entries(helpEls.boxes)) {
-    if (!pos[key]) continue;
+    const on = Boolean(pos[key]);
+    box.classList.toggle('on', on);
+    helpEls.links[key].g.classList.toggle('on', on);
+    if (!on) continue;
     const x = Math.round(pos[key].x), y = Math.round(pos[key].y);
     box.style.left = `${x}px`;
     box.style.top = `${y}px`;
@@ -1169,15 +1206,18 @@ function layoutHelp() {
     const t = tg[key];
     const pts = helpLink({ l: x, t: y, r: x + size[key].w, b: y + size[key].h }, t).map(([px, py]) => [Math.round(px), Math.round(py)]);
     const [ex, ey] = pts[pts.length - 1];
-    // each stroke is drawn twice: a background-coloured halo first, so it reads over any photo
-    const rect = `x="${Math.round(t.l)}" y="${Math.round(t.t)}" width="${Math.round(t.r - t.l)}" height="${Math.round(t.b - t.t)}"`;
-    const line = `points="${pts.map((q) => q.join(',')).join(' ')}"`;
-    svg += `<rect class="group halo" ${rect}/><polyline class="link halo" ${line}/>`
-      + `<rect class="cap halo" x="${ex - 4}" y="${ey - 4}" width="8" height="8"/>`
-      + `<rect class="group" ${rect}/><polyline class="link" ${line}/>`
-      + `<rect class="cap" x="${ex - 3}" y="${ey - 3}" width="6" height="6"/>`;
+    const { outlines, lines, caps } = helpEls.links[key];
+    for (const o of outlines) {
+      o.setAttribute('x', Math.round(t.l)); o.setAttribute('y', Math.round(t.t));
+      o.setAttribute('width', Math.round(t.r - t.l)); o.setAttribute('height', Math.round(t.b - t.t));
+    }
+    for (const l of lines) l.setAttribute('points', pts.map((q) => q.join(',')).join(' '));
+    caps.forEach((c, k) => {   // halo cap first (8px), then the cap itself (6px)
+      const half = k === 0 ? 4 : 3;
+      c.setAttribute('x', ex - half); c.setAttribute('y', ey - half);
+      c.setAttribute('width', half * 2); c.setAttribute('height', half * 2);
+    });
   }
-  helpEls.svg.innerHTML = svg;
 }
 
 function setHelp(on) {
@@ -1185,19 +1225,21 @@ function setHelp(on) {
   help.open = on;
   helpEls.btn.setAttribute('aria-pressed', String(on));
   cancelAnimationFrame(help.raf);
+  clearTimeout(help.hideTimer);
   if (on) {
     ui.reprWrap.classList.remove('labels-open');
-    help.content = help.geometry = '';
-    helpEls.root.classList.remove('leaving');
+    help.geometry = '';
+    help.text = {};
     helpEls.root.hidden = false;
-    // lay out twice up front (the second pass sees the widths the first one set), then keep
-    // following the controls as bars slide in, modes change or the window resizes
+    // keep following the controls as bars slide in, modes change or the window resizes
     const tick = () => { layoutHelp(); help.raf = requestAnimationFrame(tick); };
-    layoutHelp();
     tick();
   } else {
-    helpEls.root.classList.add('leaving');
-    setTimeout(() => { if (!help.open) helpEls.root.hidden = true; }, 260);
+    for (const key of Object.keys(helpEls.boxes)) {
+      helpEls.boxes[key].classList.remove('on');
+      helpEls.links[key].g.classList.remove('on');
+    }
+    help.hideTimer = setTimeout(() => { helpEls.root.hidden = true; }, 300);
   }
 }
 
