@@ -49,10 +49,14 @@ html, body {
   color: var(--fg);
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
+  /* no blue flash over tapped buttons on phones; the buttons have their own press feedback */
+  -webkit-tap-highlight-color: transparent;
   transition: background-color .4s var(--ease), color .4s var(--ease);
 }
 
 button { font: inherit; color: inherit; cursor: pointer; }
+/* focus ring for keyboard navigation only: never after a tap or a mouse click */
+button:focus { outline: none; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 /* ---------- background grid ---------- */
