@@ -49,20 +49,25 @@
         <svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
       </button>
 
-      <!-- what the store is drawn with: the textured mesh or the dense point cloud -->
-      <div class="repr-wrap" id="repr-wrap">
-        <div class="repr-drawer" aria-hidden="true">
-          <span data-for="mesh">Mesh</span>
-          <span data-for="points">Point cloud</span>
+      <!-- controls stacked under the theme button -->
+      <div class="side-tools" id="side-tools">
+        <!-- what the store is drawn with: the textured mesh or the dense point cloud -->
+        <div class="repr-wrap" id="repr-wrap">
+          <div class="repr-drawer" aria-hidden="true">
+            <span data-for="mesh">Mesh</span>
+            <span data-for="points">Point cloud</span>
+          </div>
+          <div class="repr" role="radiogroup" aria-label="Show the store as">
+            <button class="repr-btn active" data-repr="mesh" type="button" role="radio" aria-checked="true" aria-label="Mesh">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z"/><path d="M4 7.4 12 12l8-4.6M12 12v9.2"/></svg>
+            </button>
+            <button class="repr-btn" data-repr="points" type="button" role="radio" aria-checked="false" aria-label="Point cloud">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="7" r="1.6"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="11" r="1.7"/><circle cx="17.5" cy="12.5" r="1.3"/><circle cx="7" cy="18" r="1.6"/><circle cx="13" cy="17.5" r="1.3"/><circle cx="18.5" cy="18" r="1.6"/></svg>
+            </button>
+          </div>
         </div>
-        <div class="repr" role="radiogroup" aria-label="Show the store as">
-          <button class="repr-btn active" data-repr="mesh" type="button" role="radio" aria-checked="true" aria-label="Mesh" data-label="Mesh">
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z"/><path d="M4 7.4 12 12l8-4.6M12 12v9.2"/></svg>
-          </button>
-          <button class="repr-btn" data-repr="points" type="button" role="radio" aria-checked="false" aria-label="Point cloud" data-label="Points">
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="7" r="1.6"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="11" r="1.7"/><circle cx="17.5" cy="12.5" r="1.3"/><circle cx="7" cy="18" r="1.6"/><circle cx="13" cy="17.5" r="1.3"/><circle cx="18.5" cy="18" r="1.6"/></svg>
-          </button>
-        </div>
+
+        <button class="icon-btn help-btn" id="help-toggle" type="button" aria-pressed="false" aria-label="Help: what the buttons do" title="Help (H)">?</button>
       </div>
     </div>
   </header>
@@ -137,6 +142,23 @@
       <button class="chip" id="look-recenter" type="button" title="Back to the photo's framing">Recenter</button>
     </div>
     <p class="look-note" id="look-note" aria-live="polite">Drag to look around</p>
+  </div>
+
+  <!-- help: one retro box per group of controls, each linked to the group it explains -->
+  <div class="help" id="help" hidden>
+    <svg class="help-lines" id="help-lines" aria-hidden="true"></svg>
+    <section class="help-box" id="help-top" aria-label="Help: view modes">
+      <h2><span class="help-title"></span><i></i></h2>
+      <dl></dl>
+    </section>
+    <section class="help-box" id="help-side" aria-label="Help: display options">
+      <h2><span class="help-title"></span><i></i></h2>
+      <dl></dl>
+    </section>
+    <section class="help-box" id="help-bottom" aria-label="Help: navigation">
+      <h2><span class="help-title"></span><i></i></h2>
+      <dl></dl>
+    </section>
   </div>
 
   <div class="hint" id="hint"><span class="for-mouse">Drag to orbit · Scroll to zoom · Click a camera to step into its photo</span><span class="for-touch">Drag to orbit · Pinch to zoom · Tap a camera</span></div>

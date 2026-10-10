@@ -178,18 +178,29 @@ body:not([data-view="welcome"]) .modes { opacity: 1; transform: none; pointer-ev
 }
 .icon-btn:hover { transform: rotate(-20deg); }
 
-/* ---------- mesh / points switch (sits under the theme button) ---------- */
+/* ---------- side column under the theme button: mesh / points switch, help ---------- */
 .top-right { position: relative; }
-.repr-wrap {
+.side-tools {
   position: absolute;
   top: calc(100% + 10px);
   left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   opacity: 0;
   transform: translate(-50%, -6px);
   pointer-events: none;
   transition: opacity .4s var(--ease), transform .4s var(--ease);
 }
-body:not([data-view="welcome"]) .repr-wrap { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.repr-wrap {
+  position: relative;
+  /* long-press reveals the labels: keep the browser's own long-press menu and selection out of it */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 .repr {
   position: relative;
   z-index: 1;
@@ -205,7 +216,8 @@ body:not([data-view="welcome"]) .repr-wrap { opacity: 1; transform: translate(-5
   transition: background-color .15s var(--ease) .8s, border-color .15s var(--ease) .8s;
 }
 
-/* One-time label drawer. While open, the drawer and the switch read as one rounded shape:
+/* Label drawer: opens once when the camera first settles, and again whenever the pointer glides
+   over the switch or a finger long-presses it. While open, the drawer and the switch read as one rounded shape:
    the drawer spans the switch too and the switch's own outline fades out, so there is no
    pinch where they meet. Closed, the drawer is clipped to exactly the switch's 40px capsule.
    Opening: banner 0.5s, text fades in as it lands. Closing: text fades first, then the banner. */
@@ -227,6 +239,7 @@ body:not([data-view="welcome"]) .repr-wrap { opacity: 1; transform: translate(-5
   box-shadow: var(--shadow);
   pointer-events: none;
   visibility: hidden;
+  cursor: pointer;
   clip-path: inset(0 0 0 calc(100% - 40px) round 20px);
   transition: clip-path .55s var(--ease) .25s, visibility 0s linear .95s;
 }
@@ -251,6 +264,7 @@ body:not([data-view="welcome"]) .repr-wrap { opacity: 1; transform: translate(-5
 }
 .repr-wrap.labels-open .repr-drawer {
   visibility: visible;
+  pointer-events: auto;   /* the labels are clickable too, and hovering them keeps the drawer open */
   clip-path: inset(0 0 0 0 round 20px);
   transition: clip-path .5s var(--ease), visibility 0s;
 }
@@ -274,26 +288,11 @@ body:not([data-view="welcome"]) .repr-wrap { opacity: 1; transform: translate(-5
 .repr-btn:hover { color: var(--fg); }
 .repr-btn.active { background: var(--accent); color: #121212; }
 .repr-btn.loading { animation: pulse 1s ease-in-out infinite; }
-@media (hover: hover) {
-  .repr-btn::after {
-    content: attr(data-label);
-    position: absolute;
-    right: calc(100% + 10px);
-    top: 50%;
-    transform: translate(4px, -50%);
-    padding: 4px 8px;
-    border-radius: 6px;
-    background: var(--fg);
-    color: var(--bg);
-    font-family: var(--mono);
-    font-size: 11px;
-    white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .2s, transform .2s;
-  }
-  .repr-btn:hover::after { opacity: 1; transform: translate(0, -50%); }
-}
+.repr-drawer span:hover { color: var(--fg); }
+
+.help-btn { font-family: var(--mono); font-size: 15px; font-weight: 500; line-height: 1; }
+.help-btn:hover { transform: scale(1.06); }
+.help-btn[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
 :root[data-theme="light"] .i-sun { display: none; }
 :root[data-theme="dark"] .i-moon { display: none; }
 
@@ -447,6 +446,75 @@ body.model-error .status .dot { background: #e5484d; animation: none; }
 @keyframes blink { 50% { opacity: 0; } }
 .ellipsis::after { content: ""; animation: dots 1.2s steps(4) infinite; }
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+
+/* ---------- help: retro boxes linked to the groups of controls they explain ----------
+   Same window language as the loader, but monochrome in the theme's own colours, no scanlines
+   and a larger pixel face so the text stays easy to read. Never blocks the page underneath. */
+.help {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+  color: var(--fg);
+}
+.help[hidden] { display: none; }
+.help-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  animation: help-fade .3s steps(4) both;
+}
+.help-lines .group { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 5 4; shape-rendering: crispEdges; }
+.help-lines .link { fill: none; stroke: currentColor; stroke-width: 2; shape-rendering: crispEdges; }
+.help-lines .cap { fill: currentColor; shape-rendering: crispEdges; }
+/* background-coloured underlay so the lines stay readable over any part of the store */
+.help-lines .halo { stroke: var(--bg); stroke-width: 5; stroke-dasharray: none; opacity: .8; }
+.help-lines .cap.halo { fill: var(--bg); stroke: none; }
+@keyframes help-fade { from { opacity: 0; } }
+.help-box {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: max-content;
+  max-width: 300px;   /* refined per box by the layout code */
+  background: var(--bg);
+  color: var(--fg);
+  border: 2px solid var(--fg);
+  box-shadow: 5px 5px 0 var(--fg);
+  font-family: var(--retro);
+  font-size: 19px;
+  line-height: 1.1;
+  animation: retro-in .3s steps(5) both;
+}
+.help-box[hidden] { display: none; }
+.help.compact .help-box { font-size: 17px; }
+.help.leaving .help-box { animation: retro-out .25s steps(4) both; }
+.help.leaving .help-lines { opacity: 0; }
+.help-box h2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 1px 8px 2px;
+  background: var(--fg);
+  color: var(--bg);
+  font: inherit;
+  letter-spacing: .08em;
+}
+.help-box h2 i { flex: none; width: 9px; height: 9px; border: 2px solid var(--bg); }
+.help-box dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 5px 9px;
+  margin: 0;
+  padding: 7px 9px 8px;
+}
+.help-box dt { justify-self: start; padding: 0 5px; border: 1px solid var(--fg); white-space: nowrap; }
+.help-box dd { margin: 0; }
 
 /* ---------- shot bar ---------- */
 .shotbar {

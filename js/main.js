@@ -611,6 +611,8 @@ ui.compare.addEventListener('click', () => setCompare(!state.compare));
 window.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey || !state.ready || state.view === 'welcome') return;
   const inShot = state.shot >= 0;
+  if (e.key === 'Escape' && help.open) { setHelp(false); e.preventDefault(); return; }
+  if (e.key === 'h' || e.key === 'H' || e.key === '?') { setHelp(!help.open); e.preventDefault(); return; }
   if (e.key === 'ArrowRight') { inShot ? goToShot(state.shot + 1) : (setView('tour'), goToShot(state.lastShot)); }
   else if (e.key === 'ArrowLeft') { inShot ? goToShot(state.shot - 1) : (setView('tour'), goToShot(state.lastShot)); }
   else if (e.key === 'Escape' && inShot) enterOverview();
@@ -883,6 +885,7 @@ function setReprUI(mode, loading = false) {
     b.classList.toggle('loading', on && loading);
     b.setAttribute('aria-checked', String(on));
   });
+  ui.reprLabels.forEach((l) => l.classList.toggle('current', l.dataset.for === mode));
 }
 
 function crossfadeTo(mode) {
@@ -951,19 +954,252 @@ async function setRepresentation(mode) {
 
 ui.reprBtns.forEach((b) => b.addEventListener('click', () => setRepresentation(b.dataset.repr)));
 
-// Once per visit, when the camera first settles, slide the full names out next to the
-// Mesh / Points icons, hold them, then tuck them back in (timings live in the CSS).
-const REPR_LABELS_HOLD = 2800;   // open -> start closing, ms
-let reprLabelsShown = false;
-function showReprLabels(delay) {
-  if (reprLabelsShown) return;
-  reprLabelsShown = true;
-  setTimeout(() => {
-    ui.reprLabels.forEach((l) => l.classList.toggle('current', l.dataset.for === repr.wanted));
-    ui.reprWrap.classList.add('labels-open');
-    setTimeout(() => ui.reprWrap.classList.remove('labels-open'), REPR_LABELS_HOLD);
+// The full names slide out next to the Mesh / Points icons (timings live in the CSS):
+//  - once per visit, when the camera first settles, held for a moment;
+//  - whenever the mouse glides over the switch, for as long as it stays there;
+//  - on a touch long-press, staying a little after the finger lifts.
+const REPR_LABELS_HOLD = 2800;       // automatic showing: open -> start closing, ms
+const REPR_LONG_PRESS = 450;         // ms a finger must rest on the switch
+const REPR_AFTER_PRESS = 2000;       // ms the labels stay after a long-press ends
+const reprLabels = { shown: false, timer: 0, hover: false, pressTimer: 0, longPressed: false };
+
+function openReprLabels() {
+  if (help.open) return;   // the help box next to the switch already names both modes
+  clearTimeout(reprLabels.timer);
+  ui.reprWrap.classList.add('labels-open');
+}
+function closeReprLabels(delay = 0) {
+  clearTimeout(reprLabels.timer);
+  reprLabels.timer = setTimeout(() => {
+    if (!reprLabels.hover) ui.reprWrap.classList.remove('labels-open');
   }, delay);
 }
+function showReprLabels(delay) {
+  if (reprLabels.shown) return;
+  reprLabels.shown = true;
+  setTimeout(() => { openReprLabels(); closeReprLabels(REPR_LABELS_HOLD); }, delay);
+}
+
+ui.reprWrap.addEventListener('pointerenter', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  reprLabels.hover = true;
+  openReprLabels();
+});
+ui.reprWrap.addEventListener('pointerleave', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  reprLabels.hover = false;
+  closeReprLabels(150);
+});
+ui.reprWrap.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse') return;
+  reprLabels.longPressed = false;
+  clearTimeout(reprLabels.pressTimer);
+  reprLabels.pressTimer = setTimeout(() => { reprLabels.longPressed = true; openReprLabels(); }, REPR_LONG_PRESS);
+});
+for (const type of ['pointerup', 'pointercancel']) {
+  ui.reprWrap.addEventListener(type, (e) => {
+    if (e.pointerType === 'mouse') return;
+    clearTimeout(reprLabels.pressTimer);
+    if (reprLabels.longPressed) closeReprLabels(REPR_AFTER_PRESS);
+  });
+}
+// a long-press only reveals the labels: swallow the click that follows it
+ui.reprWrap.addEventListener('click', (e) => {
+  if (!reprLabels.longPressed) return;
+  reprLabels.longPressed = false;
+  e.stopPropagation();
+  e.preventDefault();
+}, true);
+ui.reprWrap.addEventListener('contextmenu', (e) => e.preventDefault());
+ui.reprLabels.forEach((l) => l.addEventListener('click', () => setRepresentation(l.dataset.for)));
+
+/* ------------------------------------------------------------------ help */
+
+// One retro box per group of controls (top switch, side column, bottom bar), each joined by a
+// line to a dashed outline around its group. The text follows what is on screen, and the page
+// stays fully usable underneath: the overlay never takes pointer events.
+const helpEls = {
+  root: $('#help'),
+  svg: $('#help-lines'),
+  btn: $('#help-toggle'),
+  boxes: { top: $('#help-top'), side: $('#help-side'), bottom: $('#help-bottom') },
+};
+const help = { open: false, raf: 0, content: '', geometry: '' };
+const HELP_MARGIN = 12;   // boxes keep this far from the screen edge
+const HELP_GAP = 22;      // length of the link between a box and its group
+const HELP_PAD = 6;       // dashed outline's distance from the controls
+
+function helpGroups() {
+  const touch = window.matchMedia('(hover: none)').matches;
+  const groups = {
+    top: { title: 'VIEW', rows: [['Tour', 'step through the photos'], ['Overview', 'orbit the whole store']] },
+    side: { title: 'DISPLAY', rows: [['Theme', 'light or dark'], ['Mesh', 'textured 3D surface'], ['Points', 'dense point cloud'], ['?', 'show or hide this help']] },
+  };
+  if (state.shot >= 0) {
+    const swipes = look.mode !== 'drag';   // in Drag mode a swipe looks around instead
+    const rows = [
+      ['< >', `previous / next photo${swipes ? (touch ? ', or swipe' : ', or arrow keys') : ''}`],
+      ['Compare', 'fade the photo to check the fit'],
+      ['Overview', 'back out to the whole store'],
+    ];
+    if (look.mode === 'locked') {
+      rows.push(['Nav', 'unlock to look around from here']);
+    } else {
+      rows.push(['Nav', 'lock back onto the photo'], ['Drag', 'look around by dragging'],
+        ['Gyro', touch ? 'look around by moving your phone' : 'look around with a phone\'s motion sensor'],
+        ['Recenter', 'return to the photo\'s framing']);
+    }
+    groups.bottom = { title: look.mode === 'locked' ? 'PHOTO' : 'PHOTO + LOOK AROUND', rows };
+  } else if (state.view === 'overview') {
+    groups.bottom = {
+      title: 'MOVE',
+      rows: [['Drag', 'orbit around the store'], [touch ? 'Pinch' : 'Scroll', 'zoom in and out'],
+        [touch ? 'Tap' : 'Click', 'a pink camera to step into its photo']],
+    };
+  }
+  return groups;
+}
+
+function helpTargets() {
+  const union = (els) => {
+    const r = { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity };
+    for (const el of els) {
+      // layout size around the on-screen centre: a hover rotation or press scale on a button
+      // must not make the outline (and everything placed from it) jump
+      const q = el.getBoundingClientRect();
+      const cx = (q.left + q.right) / 2, cy = (q.top + q.bottom) / 2, hw = el.offsetWidth / 2, hh = el.offsetHeight / 2;
+      r.l = Math.min(r.l, cx - hw); r.t = Math.min(r.t, cy - hh); r.r = Math.max(r.r, cx + hw); r.b = Math.max(r.b, cy + hh);
+    }
+    return { l: r.l - HELP_PAD, t: r.t - HELP_PAD, r: r.r + HELP_PAD, b: r.b + HELP_PAD };
+  };
+  const t = { top: union([$('.modes')]), side: union([$('#theme-toggle'), $('.repr'), helpEls.btn]) };
+  if (state.shot >= 0) t.bottom = union(look.mode === 'locked' ? [$('#shotbar')] : [$('#shotbar'), $('#look-menu')]);
+  else if (state.view === 'overview') t.bottom = union([$('#hint')]);
+  return t;
+}
+
+// Straight line where the box and its group overlap along one axis; an L out of the box's
+// side when the group sits diagonally from it (the side box on narrow screens).
+function helpLink(box, tgt) {
+  const mid = (a, b) => (a + b) / 2;
+  if (box.b <= tgt.t || box.t >= tgt.b) {
+    const above = box.b <= tgt.t;
+    const y0 = above ? box.b : box.t, y1 = above ? tgt.t : tgt.b;
+    const lo = Math.max(box.l + 12, tgt.l + 6), hi = Math.min(box.r - 12, tgt.r - 6);
+    if (lo <= hi) { const x = clamp(mid(tgt.l, tgt.r), lo, hi); return [[x, y0], [x, y1]]; }
+    const x1 = clamp(mid(tgt.l, tgt.r), tgt.l + 6, tgt.r - 6);
+    const ySide = above ? box.b - 16 : box.t + 16;
+    return [[box.r <= tgt.l ? box.r : box.l, ySide], [x1, ySide], [x1, y1]];
+  }
+  const left = box.r <= tgt.l;
+  const x0 = left ? box.r : box.l, x1 = left ? tgt.l : tgt.r;
+  const lo = Math.max(box.t + 12, tgt.t + 6), hi = Math.min(box.b - 12, tgt.b - 6);
+  if (lo <= hi) { const y = clamp(mid(tgt.t, tgt.b), lo, hi); return [[x0, y], [x1, y]]; }
+  const y0 = clamp(mid(tgt.t, tgt.b), box.t + 12, box.b - 12), y1 = clamp(y0, tgt.t + 6, tgt.b - 6);
+  return [[x0, y0], [mid(x0, x1), y0], [mid(x0, x1), y1], [x1, y1]];
+}
+
+function layoutHelp() {
+  // 1. text: rebuild only when what is on screen changed
+  const groups = helpGroups();
+  const content = JSON.stringify(groups);
+  if (content !== help.content) {
+    help.content = content;
+    for (const [key, box] of Object.entries(helpEls.boxes)) {
+      const g = groups[key];
+      box.hidden = !g;
+      if (!g) continue;
+      box.querySelector('.help-title').textContent = g.title;
+      box.querySelector('dl').replaceChildren(...g.rows.flatMap(([k, v]) => {
+        const dt = document.createElement('dt'), dd = document.createElement('dd');
+        dt.textContent = k; dd.textContent = v;
+        return [dt, dd];
+      }));
+    }
+  }
+
+  // 2. measure (all reads before any writes)
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const tg = helpTargets();
+  const size = {};
+  for (const [key, box] of Object.entries(helpEls.boxes)) if (!box.hidden) size[key] = { w: box.offsetWidth, h: box.offsetHeight };
+  const geometry = JSON.stringify([vw, vh, tg, size]);
+  if (geometry === help.geometry) return;
+  help.geometry = geometry;
+
+  // 3. place the boxes: top one under the view switch, side one left of the column, bottom one above the bar
+  const sideLimit = tg.side.l - HELP_GAP;                 // nothing may cross into the side column
+  const maxW = { top: Math.min(310, sideLimit - 14 - HELP_MARGIN), side: Math.min(300, sideLimit - HELP_MARGIN), bottom: Math.min(380, vw - 2 * HELP_MARGIN) };
+  const pos = {};
+  pos.top = {
+    x: clamp((tg.top.l + tg.top.r) / 2 - size.top.w / 2, HELP_MARGIN, Math.max(HELP_MARGIN, sideLimit + 8 - size.top.w)),
+    y: tg.top.b + HELP_GAP,
+  };
+  pos.side = { x: sideLimit - size.side.w, y: tg.side.t };
+  const hits = (a, aw, ah, b) => a.x < b.r + 8 && a.x + aw > b.l - 8 && a.y < b.b + 8 && a.y + ah > b.t - 8;
+  const topBox = { l: pos.top.x, t: pos.top.y, r: pos.top.x + size.top.w, b: pos.top.y + size.top.h };
+  if (hits(pos.side, size.side.w, size.side.h, tg.top) || hits(pos.side, size.side.w, size.side.h, topBox)) {
+    pos.side.y = topBox.b + 14;   // narrow screens: stack it under the first box
+  }
+  if (size.bottom && tg.bottom) {
+    pos.bottom = {
+      x: clamp((tg.bottom.l + tg.bottom.r) / 2 - size.bottom.w / 2, HELP_MARGIN, Math.max(HELP_MARGIN, vw - HELP_MARGIN - size.bottom.w)),
+      y: tg.bottom.t - HELP_GAP - size.bottom.h,
+    };
+    // Short screens: if the bottom box would run into the stack above it, drop the VIEW box
+    // (its two buttons already say what they do) and move the side box up into its place.
+    if (pos.side.y > tg.side.t && pos.bottom.y < pos.side.y + size.side.h + 10) {
+      pos.side.y = pos.top.y;
+      pos.top = null;
+    }
+  }
+  helpEls.boxes.top.style.visibility = pos.top ? '' : 'hidden';   // stays measurable, so the choice is stable
+
+  // 4. write: positions, widths, then the outlines and links
+  helpEls.root.classList.toggle('compact', vh < 720 || vw < 380);
+  let svg = '';
+  for (const [key, box] of Object.entries(helpEls.boxes)) {
+    if (!pos[key]) continue;
+    const x = Math.round(pos[key].x), y = Math.round(pos[key].y);
+    box.style.left = `${x}px`;
+    box.style.top = `${y}px`;
+    box.style.maxWidth = `${Math.max(150, Math.round(maxW[key]))}px`;
+    const t = tg[key];
+    const pts = helpLink({ l: x, t: y, r: x + size[key].w, b: y + size[key].h }, t).map(([px, py]) => [Math.round(px), Math.round(py)]);
+    const [ex, ey] = pts[pts.length - 1];
+    // each stroke is drawn twice: a background-coloured halo first, so it reads over any photo
+    const rect = `x="${Math.round(t.l)}" y="${Math.round(t.t)}" width="${Math.round(t.r - t.l)}" height="${Math.round(t.b - t.t)}"`;
+    const line = `points="${pts.map((q) => q.join(',')).join(' ')}"`;
+    svg += `<rect class="group halo" ${rect}/><polyline class="link halo" ${line}/>`
+      + `<rect class="cap halo" x="${ex - 4}" y="${ey - 4}" width="8" height="8"/>`
+      + `<rect class="group" ${rect}/><polyline class="link" ${line}/>`
+      + `<rect class="cap" x="${ex - 3}" y="${ey - 3}" width="6" height="6"/>`;
+  }
+  helpEls.svg.innerHTML = svg;
+}
+
+function setHelp(on) {
+  if (on === help.open) return;
+  help.open = on;
+  helpEls.btn.setAttribute('aria-pressed', String(on));
+  cancelAnimationFrame(help.raf);
+  if (on) {
+    ui.reprWrap.classList.remove('labels-open');
+    help.content = help.geometry = '';
+    helpEls.root.classList.remove('leaving');
+    helpEls.root.hidden = false;
+    // lay out twice up front (the second pass sees the widths the first one set), then keep
+    // following the controls as bars slide in, modes change or the window resizes
+    const tick = () => { layoutHelp(); help.raf = requestAnimationFrame(tick); };
+    layoutHelp();
+    tick();
+  } else {
+    helpEls.root.classList.add('leaving');
+    setTimeout(() => { if (!help.open) helpEls.root.hidden = true; }, 260);
+  }
+}
+
+helpEls.btn.addEventListener('click', () => setHelp(!help.open));
 
 /* ------------------------------------------------------------------ loop */
 

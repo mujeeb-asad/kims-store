@@ -23,10 +23,10 @@ Gyro look-around needs HTTPS, so test it on the live site rather than on a local
 ## Layout
 
 ```
-index.html                  page shell: welcome card, retro loader, shot bar, look-around menu
+index.html                  page shell: welcome card, retro loader, shot bar, look-around menu, help boxes
 css/style.css               light/dark tokens, grid background, UI
 js/main.js                  three.js scene, tour/overview modes, flights, photo overlay,
-                            look-around (drag + gyro), mesh / point cloud switch
+                            look-around (drag + gyro), mesh / point cloud switch, help overlay
 assets/kims.glb             web-optimized mesh (8 MB; from type_glb/kims_model_but_fixed_axes.glb)
 assets/points.glb           dense point cloud, 1.34M points (9 MB)
 assets/points-preview.glb   coarse point cloud shown while the full one loads (2 MB)
@@ -93,8 +93,13 @@ All commands run from the `CV/` root.
 | L | unlock / lock the camera at a shot to look around (drag or gyro) |
 | C | Compare: fade the photo to 45 % to check the fit against the model |
 | P | switch between mesh and point cloud |
+| H or ? | show / hide the help boxes that explain every control |
 | Esc | leave the shot, back to overview |
 | Drag / scroll (overview) | orbit / zoom; click or tap a camera to step into its photo |
+
+Gliding the mouse over the Mesh / Points switch, or long-pressing it on a phone, slides out its full
+labels (a long-press only reveals them; it doesn't switch modes). The help boxes are grouped per set of
+controls (view switch, side column, bottom bar), follow what is on screen, and never block the page.
 
 While the camera is unlocked in Drag mode, swiping looks around instead of changing shots; the arrow
 buttons still navigate. Gyro mode asks for motion permission on iPhone and falls back to Drag when
