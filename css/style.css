@@ -128,7 +128,9 @@ body.model-ready[data-view="welcome"] #scene { opacity: .55; }
 
 .modes {
   position: relative;
-  display: flex;
+  /* two equal columns sized to the wider label, so Tour and Overview balance */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 999px;

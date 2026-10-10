@@ -377,6 +377,8 @@ async function goToShot(i) {
   if (state.shot === -1 && state.view === 'overview' && controls.enabled) {
     state.lastOverview = { pos: camera.position.clone(), target: controls.target.clone() };
   }
+  // being at a photo is the tour, however you got there (arrows, a camera in the overview, a swipe)
+  if (state.view !== 'tour') setView('tour');
   state.shot = i;
   state.lastShot = i;
   body.classList.add('in-shot');
