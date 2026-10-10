@@ -469,7 +469,7 @@ function setLookMode(mode) {
   body.classList.toggle('look-unlocked', unlocked);
   body.classList.toggle('look-drag', mode === 'drag');
   ui.lookLock.setAttribute('aria-pressed', String(unlocked));
-  ui.lookLock.title = unlocked ? 'Lock the camera back to the photo (L)' : 'Unlock the camera to look around (L)';
+  ui.lookLock.title = unlocked ? 'Lock the camera back to the photo (L)' : 'Unlock the camera to look around by drag or gyro (L)';
   ui.lookBtns.forEach((b) => {
     const on = b.dataset.look === mode;
     b.classList.toggle('active', on);
@@ -1045,7 +1045,7 @@ function helpGroups() {
       ['Overview', 'back out to the whole store'],
     ];
     if (look.mode === 'locked') {
-      rows.push(['Nav', 'unlock to look around from here']);
+      rows.push(['Nav', 'unlock to look around: drag/gyro']);
     } else {
       rows.push(['Nav', 'lock back onto the photo'], ['Drag', 'look around by dragging'],
         ['Gyro', touch ? 'look around by moving your phone' : 'look around with a phone\'s motion sensor'],
