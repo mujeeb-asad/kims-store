@@ -106,11 +106,12 @@ The `?` button under the Mesh / Points switch starts a guided walk through every
 retro box at a time with an arrow to the control to try, and moves on shortly after the visitor has
 tried it:
 
-Compare, Nav, Drag, Gyro (phones with a motion sensor only), Recenter, Overview, orbiting the store,
-Mesh / Points, a brief note on the theme button, picking a camera, and done.
+moving between photos (arrows and arrow keys on a computer, swipe and arrows on a phone), Compare, Nav,
+Drag, Gyro (phones with a motion sensor only), Recenter, Overview, orbiting the store, Mesh / Points,
+a brief note on the theme button, picking a camera, and done.
 
-The pause before the next box is five seconds by default, with a few exceptions: about two seconds
-after Compare, none after Nav (the Drag box follows at once), one second after Gyro is turned on
+The pause before the next box is five seconds by default, with a few exceptions: two and a half
+seconds after moving to another photo, about two seconds after Compare, none after Nav (the Drag box follows at once), one second after Gyro is turned on
 (Recenter follows quickly, since people lose their bearings fast), eight seconds after Recenter
 while gyro is on, and none after Overview (the next box appears as the camera lands). The Drag pause
 starts the moment the visitor begins to drag.

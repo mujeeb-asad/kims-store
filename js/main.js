@@ -1063,6 +1063,17 @@ const overviewClosed = () => state.shot >= 0;
 // gate:   true while the step's gateway is closed (see above);  skip: true where the step never applies (gyro on a desktop)
 const DEMO_STEPS = [
   {
+    // first: how to move between photos, worded for the device in hand
+    id: 'arrows', title: 'MOVE', scene: 'tour', place: 'above', need: backToTour, gate: tourClosed,
+    target: () => (ui.next.disabled ? ui.prev : ui.next),
+    text: () => (touchUI()
+      ? 'Walk the store photo by photo. Swipe left or right, or tap the arrows.'
+      : 'Walk the store photo by photo. Click the arrows, or press the left and right arrow keys.'),
+    enter: () => { demo.base = state.shot; },
+    done: () => state.shot >= 0 && state.shot !== demo.base,
+    wait: 2500,   // long enough for the camera to reach the next photo
+  },
+  {
     id: 'compare', title: 'COMPARE', scene: 'tour', place: 'above', target: () => ui.compare, need: backToTour, gate: tourClosed,
     text: () => `Fades the photo so you can check it against the 3D model behind it. ${tapWord()} Compare to try it.`,
     enter: () => { demo.base = state.compare; },
