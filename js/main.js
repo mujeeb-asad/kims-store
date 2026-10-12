@@ -1346,6 +1346,7 @@ function setDemo(on) {
   if (on === demo.on) return;
   demo.on = on;
   demoEls.btn.setAttribute('aria-pressed', String(on));
+  demoEls.wrap.classList.toggle('running', on);
   cancelAnimationFrame(demo.raf);
   clearTimeout(demo.hideTimer);
   demoLabel();

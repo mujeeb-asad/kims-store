@@ -336,7 +336,9 @@ body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-
   height: 100%;
   display: flex;
   align-items: center;
-  padding: 0 43px 0 12px;   /* the 38px button plus a small gap after the text */
+  /* the text runs a little into the button's 38px slot so it ends about one word-gap from the "?"
+     itself, which sits in the middle of that slot */
+  padding: 0 31px 0 12px;
   border: 1px solid var(--line);
   border-radius: 19px;
   background: var(--bg-elev);
@@ -359,6 +361,8 @@ body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-
   transform: translateX(8px);
   transition: opacity .25s var(--ease), transform .25s var(--ease);
 }
+/* while the demo runs the icon is the filled disc, so the text stops just short of the disc */
+.demo-wrap.running .demo-drawer { padding-right: 40px; }
 .demo-wrap.labels-open .demo-drawer {
   visibility: visible;
   pointer-events: auto;
