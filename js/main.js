@@ -1019,7 +1019,7 @@ const demoEls = {
 };
 const demo = {
   on: false, step: 0, entered: false, shown: false, waitUntil: 0, autoAt: 0, base: null,
-  raf: 0, hideTimer: 0, key: '', swapAt: 0, geometry: '', recenters: 0, hinted: false,
+  raf: 0, hideTimer: 0, key: '', swapAt: 0, geometry: '', recenters: 0, hinted: false, plan: null,
 };
 const demoDrawer = makeDrawer(demoEls.wrap);
 
@@ -1050,40 +1050,47 @@ const backToTour = () => state.shot < 0 && { text: `${tapWord()} Tour to carry o
 const backToUnlocked = () => look.mode === 'locked' && { text: `${tapWord()} Nav again to carry on.`, target: () => ui.lookLock, place: 'above' };
 const backToOverview = () => state.shot >= 0 && { text: `${tapWord()} Overview to carry on.`, target: () => modeBtn('overview'), place: 'below' };
 
+// A step's gateway is the control that has to be used first (Tour for the photo bar, Nav for the
+// look-around menu, Overview for orbiting). Skipping past a gateway skips the screens behind it too.
+const tourClosed = () => state.shot < 0;
+const navClosed = () => state.shot < 0 || look.mode === 'locked';
+const overviewClosed = () => state.shot >= 0;
+
 // target: the control the box points at (none = a floating box under the top bar)
 // done:   polled every frame; true once the visitor has tried the thing
 // need:   returns a nudge (see above) while the step cannot be done from where the visitor is
 // wait:   pause after done (default DEMO_LAPSE; a number or a function);  auto: the box passes by on its own after this long
+// gate:   true while the step's gateway is closed (see above);  skip: true where the step never applies (gyro on a desktop)
 const DEMO_STEPS = [
   {
-    id: 'compare', title: 'COMPARE', scene: 'tour', place: 'above', target: () => ui.compare, need: backToTour,
+    id: 'compare', title: 'COMPARE', scene: 'tour', place: 'above', target: () => ui.compare, need: backToTour, gate: tourClosed,
     text: () => `Fades the photo so you can check it against the 3D model behind it. ${tapWord()} Compare to try it.`,
     enter: () => { demo.base = state.compare; },
     done: () => state.compare !== demo.base,
     wait: 1700,   // with the box's fade-in, the next one is up within 2 s
   },
   {
-    id: 'nav', title: 'NAV', scene: 'tour', place: 'above', target: () => ui.lookLock, need: backToTour,
+    id: 'nav', title: 'NAV', scene: 'tour', place: 'above', target: () => ui.lookLock, need: backToTour, gate: tourClosed,
     text: () => `Nav unlocks the camera so you can look around from this exact spot, by dragging or with a phone's gyro. ${tapWord()} Nav.`,
     done: () => look.mode !== 'locked',
     wait: 0,   // the Drag box follows as soon as the look-around menu is up
   },
   {
-    id: 'drag', title: 'DRAG', scene: 'tour', place: 'above', target: () => lookBtn('drag'), need: () => backToTour() || backToUnlocked(),
+    id: 'drag', title: 'DRAG', scene: 'tour', place: 'above', target: () => lookBtn('drag'), need: () => backToTour() || backToUnlocked(), gate: navClosed,
     text: () => (touchUI() ? 'Drag is on. Slide a finger across the picture to look around.' : 'Drag is on. Click and drag the picture to look around.'),
     enter: () => { demo.base = [look.targetYaw, look.targetPitch]; },
     // any movement counts, so the pause starts the moment the visitor begins to drag
     done: () => Math.hypot(look.targetYaw - demo.base[0], look.targetPitch - demo.base[1]) > 0.004,
   },
   {
-    id: 'gyro', title: 'GYRO', scene: 'tour', place: 'above', target: () => lookBtn('gyro'), need: () => backToTour() || backToUnlocked(),
+    id: 'gyro', title: 'GYRO', scene: 'tour', place: 'above', target: () => lookBtn('gyro'), need: () => backToTour() || backToUnlocked(), gate: navClosed,
     skip: () => !demoHasGyro(),
     text: () => 'Gyro lets you look around by moving your phone. Tap Gyro. Your phone may ask for permission.',
     done: () => look.mode === 'gyro' && look.gyroLive,
     wait: DEMO_GYRO_INTRO,   // people lose their bearings quickly with gyro, so Recenter follows at once
   },
   {
-    id: 'recenter', title: 'RECENTER', scene: 'tour', place: 'above', target: () => $('#look-recenter'), need: () => backToTour() || backToUnlocked(),
+    id: 'recenter', title: 'RECENTER', scene: 'tour', place: 'above', target: () => $('#look-recenter'), need: () => backToTour() || backToUnlocked(), gate: navClosed,
     text: () => (look.mode === 'gyro'
       ? 'Now move your phone around! Lost? Tap Recenter to snap back to the photo.'
       : `Recenter snaps the view back to the photo's exact framing. ${tapWord()} Recenter.`),
@@ -1096,9 +1103,10 @@ const DEMO_STEPS = [
     id: 'overview', title: 'OVERVIEW', place: 'below', target: () => modeBtn('overview'),
     text: () => `Overview shows the whole store at once. ${tapWord()} Overview.`,
     done: () => state.shot < 0 && state.view === 'overview',
+    wait: 0,   // the next box appears as soon as the camera has landed on the overview
   },
   {
-    id: 'orbit', title: 'LOOK AROUND', need: backToOverview, ready: () => controls.enabled,
+    id: 'orbit', title: 'LOOK AROUND', need: backToOverview, gate: overviewClosed, ready: () => controls.enabled,
     text: () => `This is the whole store. Drag to orbit it, ${touchUI() ? 'pinch' : 'scroll'} to zoom.`,
     enter: () => { demo.base = null; },
     done: () => {
@@ -1122,9 +1130,15 @@ const DEMO_STEPS = [
     auto: DEMO_BRIEF, wait: 400,
   },
   {
-    id: 'pick', title: 'STEP IN', ready: () => !body.classList.contains('flying'),
-    text: () => `Now ${tapWord().toLowerCase()} any pink camera to step into its photo.`,
-    done: () => state.shot >= 0 && !body.classList.contains('flying'),
+    // Always shown: from the overview it asks for a camera, from a photo it asks for the arrows.
+    id: 'pick', title: 'STEP IN', place: 'above', ready: () => !body.classList.contains('flying'),
+    variant: () => (state.shot >= 0 ? 'photo' : 'overview'),
+    target: () => (state.shot >= 0 ? (ui.next.disabled ? ui.prev : ui.next) : null),
+    text: () => (state.shot >= 0
+      ? 'Use the arrows to step to another photo.'
+      : `Now ${tapWord().toLowerCase()} any pink camera to step into its photo.`),
+    enter: () => { demo.base = state.shot; },
+    done: () => state.shot >= 0 && state.shot !== demo.base && !body.classList.contains('flying'),
     wait: 700,
   },
   {
@@ -1268,9 +1282,10 @@ function demoAdvance(wait) {
 
 const demoWait = (st, fallback) => (typeof st.wait === 'function' ? st.wait() : st.wait ?? fallback);
 
+// Numbering is fixed when the demo first starts (which steps apply on this device), so the total
+// never changes mid-way: skipped screens leave a gap in the count instead of shrinking it.
 function demoCounter() {
-  const live = DEMO_STEPS.filter((s) => !(s.skip && s.skip()));
-  return `${live.indexOf(DEMO_STEPS[demo.step]) + 1}/${live.length}`;
+  return `${demo.plan.indexOf(DEMO_STEPS[demo.step]) + 1}/${demo.plan.length}`;
 }
 
 function demoTick() {
@@ -1291,7 +1306,7 @@ function demoTick() {
   const nudge = st.need && st.need();
   const view = nudge
     ? { title: 'DEMO', ...nudge, key: `${st.id}:${nudge.text}`, text: () => nudge.text }
-    : { ...st, key: st.id };
+    : { ...st, key: st.variant ? `${st.id}:${st.variant()}` : st.id };
   const visible = demoRender(view, demoCounter());
   if (!visible || nudge) return;
   demo.shown = true;
@@ -1319,6 +1334,7 @@ function setDemo(on) {
   if (on) {
     demoDrawer.hover = false;
     demoDrawer.close(0);
+    if (!demo.plan) demo.plan = DEMO_STEPS.filter((s) => !(s.skip && s.skip()));
     Object.assign(demo, { entered: false, shown: false, waitUntil: 0, autoAt: 0, key: '', swapAt: 0, geometry: '' });
     demoEls.root.hidden = false;
     // tour steps start from a photo: the default one, or wherever the visitor last was
@@ -1339,8 +1355,14 @@ function showDemoHint(delay) {
 
 demoEls.btn.addEventListener('click', () => setDemo(!demo.on));
 $('.demo-drawer').addEventListener('click', () => setDemo(!demo.on));
+// The close box skips the screen it is on. If that screen was a gateway (or the visitor is not
+// where the next screens need them to be), the screens behind it go with it, so the demo never
+// asks for something that was just skipped.
 demoEls.skip.addEventListener('click', () => {
   if (!demo.on) return;
+  let next = demo.step + 1;
+  while (DEMO_STEPS[next] && DEMO_STEPS[next].gate && DEMO_STEPS[next].gate()) next++;
+  demo.step = next - 1;
   demoAdvance(600);
 });
 $('#look-recenter').addEventListener('click', () => { demo.recenters++; });

@@ -111,11 +111,17 @@ Mesh / Points, a brief note on the theme button, picking a camera, and done.
 
 The pause before the next box is five seconds by default, with a few exceptions: about two seconds
 after Compare, none after Nav (the Drag box follows at once), one second after Gyro is turned on
-(Recenter follows quickly, since people lose their bearings fast), and eight seconds after Recenter
-while gyro is on. The Drag pause starts the moment the visitor begins to drag.
+(Recenter follows quickly, since people lose their bearings fast), eight seconds after Recenter
+while gyro is on, and none after Overview (the next box appears as the camera lands). The Drag pause
+starts the moment the visitor begins to drag.
 
 - The demo starts in the tour, from the default photo or the one last visited.
-- The close box in a box's title bar skips that step.
+- The close box in a box's title bar skips that screen only. Where the skipped control is the way
+  into the next screens, those go with it: skipping Nav also skips Drag, Gyro and Recenter, and
+  skipping Overview from a photo also skips orbiting.
+- The step numbers are fixed when the demo starts, so the total never changes; skipped screens
+  leave a gap in the count.
+- The last step asks for a pink camera from the overview, or for the arrows from a photo.
 - Pressing `?` again leaves the demo; it resumes at the same step until the page is closed or reloaded.
 - If the visitor wanders off (for example into the overview mid-tour), the box turns into a nudge
   pointing at the way back.
