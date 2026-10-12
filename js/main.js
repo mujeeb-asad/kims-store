@@ -1024,7 +1024,7 @@ const demo = {
 const demoDrawer = makeDrawer(demoEls.wrap);
 
 // arrow and dashed outline, each over a background-coloured halo so they read over any photo
-demoEls.pointer = (() => {
+demoEls.pointers = [0, 1].map(() => {   // two, so one box can point at a pair of controls
   const make = (tag, cls) => {
     const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
     el.setAttribute('class', cls);
@@ -1037,7 +1037,7 @@ demoEls.pointer = (() => {
   g.append(outlines[0], lines[0], heads[0], outlines[1], lines[1], heads[1]);
   demoEls.svg.append(g);
   return { g, outlines, lines, heads };
-})();
+});
 
 const touchUI = () => window.matchMedia('(hover: none)').matches;
 const tapWord = () => (touchUI() ? 'Tap' : 'Click');
@@ -1056,7 +1056,7 @@ const tourClosed = () => state.shot < 0;
 const navClosed = () => state.shot < 0 || look.mode === 'locked';
 const overviewClosed = () => state.shot >= 0;
 
-// target: the control the box points at (none = a floating box under the top bar)
+// target: the control the box points at, or targets for several (neither = a floating box under the top bar)
 // done:   polled every frame; true once the visitor has tried the thing
 // need:   returns a nudge (see above) while the step cannot be done from where the visitor is
 // wait:   pause after done (default DEMO_LAPSE; a number or a function);  auto: the box passes by on its own after this long
@@ -1065,7 +1065,7 @@ const DEMO_STEPS = [
   {
     // first: how to move between photos, worded for the device in hand
     id: 'arrows', title: 'MOVE', scene: 'tour', place: 'above', need: backToTour, gate: tourClosed,
-    target: () => (ui.next.disabled ? ui.prev : ui.next),
+    targets: () => [ui.prev, ui.next].filter((b) => !b.disabled),   // only the arrows that can be pressed
     text: () => (touchUI()
       ? 'Walk the store photo by photo. Swipe left or right, or tap the arrows.'
       : 'Walk the store photo by photo. Click the arrows, or press the left and right arrow keys.'),
@@ -1232,7 +1232,7 @@ function demoPlace(view, t, size, vw, vh) {
 
 function demoOff() {
   demoEls.box.classList.remove('on');
-  demoEls.pointer.g.classList.remove('on');
+  for (const p of demoEls.pointers) p.g.classList.remove('on');
 }
 
 // Shows `view` (a step or a nudge); returns true while its box is on screen.
@@ -1250,36 +1250,39 @@ function demoRender(view, counter) {
     demoEls.text.textContent = view.text();
     demoEls.skip.hidden = Boolean(view.auto);
   }
-  const target = view.target ? view.target() : null;
-  const ready = target ? demoShown(target) : (view.ready ? view.ready() : true);
+  // a step points at one control (target) or at several (targets), or floats with none
+  const targets = view.targets ? view.targets() : view.target ? [view.target()] : [];
+  const ready = targets.length ? targets.every(demoShown) : (view.ready ? view.ready() : true);
   if (!ready) { demoOff(); return false; }
 
   // measure, then write only when something moved
   const vw = window.innerWidth, vh = window.innerHeight;
-  const t = target ? demoRect([target], DEMO_PAD) : null;
+  const rects = targets.map((el) => demoRect([el], DEMO_PAD));
+  const around = targets.length ? demoRect(targets, DEMO_PAD) : null;   // the box is placed against all of them
   const size = { w: demoEls.box.offsetWidth, h: demoEls.box.offsetHeight };
-  const pos = demoPlace(view, t, size, vw, vh);
-  const geometry = JSON.stringify([vw, vh, t, size, pos]);
+  const pos = demoPlace(view, around, size, vw, vh);
+  const geometry = JSON.stringify([vw, vh, rects, size, pos]);
   demoEls.box.classList.add('on');
-  demoEls.pointer.g.classList.toggle('on', Boolean(t));
+  demoEls.pointers.forEach((p, k) => p.g.classList.toggle('on', k < rects.length));
   if (geometry === demo.geometry) return true;
   demo.geometry = geometry;
   demoEls.root.classList.toggle('compact', vh < 720 || vw < 380);
   demoEls.box.style.left = `${pos.x}px`;
   demoEls.box.style.top = `${pos.y}px`;
-  if (t) {
-    const pts = demoLink({ l: pos.x, t: pos.y, r: pos.x + size.w, b: pos.y + size.h }, t).map(([px, py]) => [Math.round(px), Math.round(py)]);
+  const box = { l: pos.x, t: pos.y, r: pos.x + size.w, b: pos.y + size.h };
+  rects.forEach((t, k) => {
+    const pts = demoLink(box, t).map(([px, py]) => [Math.round(px), Math.round(py)]);
     const [ex, ey] = pts[pts.length - 1], [px, py] = pts[pts.length - 2];
     const ux = Math.sign(ex - px), uy = Math.sign(ey - py);          // direction of the last segment
     const head = [[ex, ey], [ex - ux * 9 - uy * 5, ey - uy * 9 + ux * 5], [ex - ux * 9 + uy * 5, ey - uy * 9 - ux * 5]];
-    const { outlines, lines, heads } = demoEls.pointer;
+    const { outlines, lines, heads } = demoEls.pointers[k];
     for (const o of outlines) {
       o.setAttribute('x', Math.round(t.l)); o.setAttribute('y', Math.round(t.t));
       o.setAttribute('width', Math.round(t.r - t.l)); o.setAttribute('height', Math.round(t.b - t.t));
     }
     for (const l of lines) l.setAttribute('points', pts.map((q) => q.join(',')).join(' '));
     for (const h of heads) h.setAttribute('points', head.map((q) => q.join(',')).join(' '));
-  }
+  });
   return true;
 }
 
