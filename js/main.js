@@ -1019,7 +1019,7 @@ const demoEls = {
 };
 const demo = {
   on: false, step: 0, entered: false, shown: false, waitUntil: 0, autoAt: 0, base: null,
-  raf: 0, hideTimer: 0, key: '', swapAt: 0, geometry: '', recenters: 0, hinted: false, plan: null,
+  raf: 0, hideTimer: 0, key: '', swapAt: 0, geometry: '', recenters: 0, hinted: false, plan: null, skipped: new Set(),
 };
 const demoDrawer = makeDrawer(demoEls.wrap);
 
@@ -1141,15 +1141,16 @@ const DEMO_STEPS = [
     auto: DEMO_BRIEF, wait: 400,
   },
   {
-    // Always shown: from the overview it asks for a camera, from a photo it asks for the arrows.
-    id: 'pick', title: 'STEP IN', place: 'above', ready: () => !body.classList.contains('flying'),
-    variant: () => (state.shot >= 0 ? 'photo' : 'overview'),
-    target: () => (state.shot >= 0 ? (ui.next.disabled ? ui.prev : ui.next) : null),
-    text: () => (state.shot >= 0
-      ? 'Use the arrows to step to another photo.'
-      : `Now ${tapWord().toLowerCase()} any pink camera to step into its photo.`),
-    enter: () => { demo.base = state.shot; },
-    done: () => state.shot >= 0 && state.shot !== demo.base && !body.classList.contains('flying'),
+    // Picking a camera only exists in the overview. If the visitor skipped Overview, this goes
+    // with it; if they merely wandered back to a photo, the usual nudge sends them there.
+    id: 'pick', title: 'STEP IN', need: backToOverview, ready: () => !body.classList.contains('flying'),
+    skip: () => demo.skipped.has('overview') && state.shot >= 0,
+    text: () => `Now ${tapWord().toLowerCase()} any pink camera to step into its photo.`,
+    enter: () => { demo.base = false; },
+    done: () => {
+      if (state.shot < 0) demo.base = true;   // only a photo reached from the overview counts
+      return demo.base && state.shot >= 0 && !body.classList.contains('flying');
+    },
     wait: 700,
   },
   {
@@ -1303,7 +1304,7 @@ function demoTick() {
   demo.raf = requestAnimationFrame(demoTick);
   const now = performance.now();
   const st = DEMO_STEPS[demo.step];
-  if (!st) { demo.step = 0; setDemo(false); return; }
+  if (!st) { demo.step = 0; demo.skipped.clear(); setDemo(false); return; }
   if (st.skip && st.skip()) { demo.step++; demo.entered = false; return; }   // e.g. gyro on a desktop
   if (now < demo.waitUntil) { demoRender(null); return; }
   if (!demo.entered) {
@@ -1317,14 +1318,14 @@ function demoTick() {
   const nudge = st.need && st.need();
   const view = nudge
     ? { title: 'DEMO', ...nudge, key: `${st.id}:${nudge.text}`, text: () => nudge.text }
-    : { ...st, key: st.variant ? `${st.id}:${st.variant()}` : st.id };
+    : { ...st, key: st.id };
   const visible = demoRender(view, demoCounter());
   if (!visible || nudge) return;
   demo.shown = true;
   if (st.auto) {
     demo.autoAt = demo.autoAt || now + st.auto;
     if (now >= demo.autoAt) {
-      if (st.last) { demo.step = 0; setDemo(false); } else demoAdvance(demoWait(st, 400));
+      if (st.last) { demo.step = 0; demo.skipped.clear(); setDemo(false); } else demoAdvance(demoWait(st, 400));
     }
   }
 }
@@ -1373,6 +1374,7 @@ demoEls.skip.addEventListener('click', () => {
   if (!demo.on) return;
   let next = demo.step + 1;
   while (DEMO_STEPS[next] && DEMO_STEPS[next].gate && DEMO_STEPS[next].gate()) next++;
+  for (let k = demo.step; k < next; k++) demo.skipped.add(DEMO_STEPS[k].id);
   demo.step = next - 1;
   demoAdvance(600);
 });
