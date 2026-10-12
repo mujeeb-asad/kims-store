@@ -67,7 +67,11 @@
           </div>
         </div>
 
-        <button class="icon-btn help-btn" id="help-toggle" type="button" aria-pressed="false" aria-label="Help: what the buttons do" title="Help (H)">?</button>
+        <!-- demo mode: a guided walk through every control, one step at a time -->
+        <div class="demo-wrap" id="demo-wrap">
+          <div class="demo-drawer" aria-hidden="true"><span id="demo-label">Lost? Try demo mode</span></div>
+          <button class="icon-btn demo-btn" id="demo-toggle" type="button" aria-pressed="false" aria-label="Demo mode: a guided walk through the controls" title="Demo mode (H)">?</button>
+        </div>
       </div>
     </div>
   </header>
@@ -144,20 +148,18 @@
     <p class="look-note" id="look-note" aria-live="polite">Drag to look around</p>
   </div>
 
-  <!-- help: one retro box per group of controls, each linked to the group it explains -->
-  <div class="help" id="help" hidden>
-    <svg class="help-lines" id="help-lines" aria-hidden="true"></svg>
-    <section class="help-box" id="help-top" aria-label="Help: view modes">
-      <h2><span class="help-title"></span><i></i></h2>
-      <dl></dl>
-    </section>
-    <section class="help-box" id="help-side" aria-label="Help: display options">
-      <h2><span class="help-title"></span><i></i></h2>
-      <dl></dl>
-    </section>
-    <section class="help-box" id="help-bottom" aria-label="Help: navigation">
-      <h2><span class="help-title"></span><i></i></h2>
-      <dl></dl>
+  <!-- demo: one retro box at a time, with an arrow to the control it is about -->
+  <div class="demo" id="demo" hidden>
+    <svg class="demo-lines" id="demo-lines" aria-hidden="true"></svg>
+    <section class="demo-box" id="demo-box" role="status" aria-live="polite">
+      <h2>
+        <span class="demo-title" id="demo-title"></span>
+        <span class="demo-count" id="demo-count"></span>
+        <button class="demo-skip" id="demo-skip" type="button" aria-label="Skip this step" title="Skip this step">
+          <svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="square"/></svg>
+        </button>
+      </h2>
+      <p class="demo-text" id="demo-text"></p>
     </section>
   </div>
 

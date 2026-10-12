@@ -184,7 +184,7 @@ body:not([data-view="welcome"]) .modes { opacity: 1; transform: none; pointer-ev
 }
 .icon-btn:hover { transform: rotate(-20deg); }
 
-/* ---------- side column under the theme button: mesh / points switch, help ---------- */
+/* ---------- side column under the theme button: mesh / points switch, demo ---------- */
 .top-right { position: relative; }
 .side-tools {
   position: absolute;
@@ -296,9 +296,72 @@ body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-
 .repr-btn.loading { animation: pulse 1s ease-in-out infinite; }
 .repr-drawer span:hover { color: var(--fg); }
 
-.help-btn { font-family: var(--mono); font-size: 15px; font-weight: 500; line-height: 1; }
-.help-btn:hover { transform: scale(1.06); }
-.help-btn[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+/* Demo button with its own drawer ("Lost? Try demo mode"), built like the one above: open, the
+   drawer spans the button and the button's outline fades, so the two read as one pill. */
+.demo-wrap {
+  position: relative;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.demo-btn {
+  position: relative;
+  z-index: 1;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  transition: transform .3s var(--ease), background-color .15s var(--ease) .8s, border-color .15s var(--ease) .8s, color .15s var(--ease);
+}
+.demo-btn:hover { transform: scale(1.06); }
+.demo-btn[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); transition: transform .3s var(--ease), color .15s var(--ease); }
+.demo-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 48px 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 19px;
+  background: var(--bg-elev);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+  cursor: pointer;
+  clip-path: inset(0 0 0 calc(100% - 38px) round 19px);
+  transition: clip-path .55s var(--ease) .25s, visibility 0s linear .95s;
+}
+.demo-drawer span {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg);
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity .25s var(--ease), transform .25s var(--ease);
+}
+.demo-wrap.labels-open .demo-drawer {
+  visibility: visible;
+  pointer-events: auto;
+  clip-path: inset(0 0 0 0 round 19px);
+  transition: clip-path .5s var(--ease), visibility 0s;
+}
+.demo-wrap.labels-open .demo-drawer span {
+  opacity: 1;
+  transform: none;
+  transition: opacity .35s var(--ease) .3s, transform .35s var(--ease) .3s;
+}
+.demo-wrap.labels-open .demo-btn:not([aria-pressed="true"]) {
+  background-color: transparent;
+  border-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: transform .3s var(--ease), background-color .15s var(--ease), border-color .15s var(--ease);
+}
 :root[data-theme="light"] .i-sun { display: none; }
 :root[data-theme="dark"] .i-moon { display: none; }
 
@@ -454,82 +517,90 @@ body.model-error .status .dot { background: #e5484d; animation: none; }
 .ellipsis::after { content: ""; animation: dots 1.2s steps(4) infinite; }
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
 
-/* ---------- help: retro boxes linked to the groups of controls they explain ----------
+/* ---------- demo: one retro box at a time, with an arrow to the control it is about ----------
    Same window language as the loader, but monochrome in the theme's own colours, no scanlines
-   and a larger pixel face so the text stays easy to read. Never blocks the page underneath. */
-.help {
+   and a larger pixel face so the text stays easy to read. Only the close box takes clicks. */
+.demo {
   position: fixed;
   inset: 0;
   z-index: 25;
   pointer-events: none;
   color: var(--fg);
 }
-.help[hidden] { display: none; }
-.help-lines {
+.demo[hidden] { display: none; }
+.demo-lines {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   overflow: visible;
 }
-/* each group's outline and link fades with its box */
-.help-group { opacity: 0; transition: opacity .2s ease-in; }
-.help-group.on { opacity: 1; transition: opacity .35s var(--ease) .1s; }
-.help-lines .group { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 5 4; shape-rendering: crispEdges; }
-.help-lines .link { fill: none; stroke: currentColor; stroke-width: 2; shape-rendering: crispEdges; }
-.help-lines .cap { fill: currentColor; shape-rendering: crispEdges; }
+/* the outline and arrow fade with the box */
+.demo-pointer { opacity: 0; transition: opacity .2s ease-in; }
+.demo-pointer.on { opacity: 1; transition: opacity .35s var(--ease) .1s; }
+.demo-lines .group { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 5 4; shape-rendering: crispEdges; }
+.demo-lines .link { fill: none; stroke: currentColor; stroke-width: 2; shape-rendering: crispEdges; }
+.demo-lines .cap { fill: currentColor; }
 /* background-coloured underlay so the lines stay readable over any part of the store */
-.help-lines .halo { stroke: var(--bg); stroke-width: 5; stroke-dasharray: none; opacity: .8; }
-.help-lines .cap.halo { fill: var(--bg); stroke: none; }
-.help-box {
+.demo-lines .halo { stroke: var(--bg); stroke-width: 5; stroke-dasharray: none; opacity: .8; }
+.demo-lines .cap.halo { fill: var(--bg); stroke: var(--bg); stroke-width: 4; stroke-linejoin: round; }
+.demo-box {
   position: absolute;
   left: 0;
   top: 0;
   width: max-content;
-  max-width: 300px;   /* refined per box by the layout code */
+  max-width: min(300px, calc(100vw - 24px));
   background: var(--bg);
   color: var(--fg);
   border: 2px solid var(--fg);
   box-shadow: 5px 5px 0 var(--fg);
   font-family: var(--retro);
   font-size: 19px;
-  line-height: 1.1;
-  /* a box is on only while the controls it explains are on screen; off, it stays measurable */
+  line-height: 1.12;
+  /* on only while the control it points at is on screen */
   opacity: 0;
   visibility: hidden;
   transform: translateY(8px) scale(.94);
   transition: opacity .22s ease-in, transform .22s ease-in, visibility 0s linear .22s;
 }
-.help-box.on {
+.demo-box.on {
   opacity: 1;
   visibility: visible;
   transform: none;
   transition: opacity .35s var(--ease), transform .35s var(--ease), visibility 0s;
 }
-.help.compact .help-box { font-size: 17px; }
-.help-box h2 {
+.demo.compact .demo-box { font-size: 17px; }
+.demo-box h2 {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   margin: 0;
-  padding: 1px 8px 2px;
+  padding: 2px 4px 2px 8px;
   background: var(--fg);
   color: var(--bg);
   font: inherit;
   letter-spacing: .08em;
 }
-.help-box h2 i { flex: none; width: 9px; height: 9px; border: 2px solid var(--bg); }
-.help-box dl {
+.demo-title { flex: 1; }
+.demo-count { opacity: .7; letter-spacing: .02em; }
+/* close box in the title bar, like a classic window: skips the current step */
+.demo-skip {
+  position: relative;
+  flex: none;
   display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: baseline;
-  gap: 5px 9px;
-  margin: 0;
-  padding: 7px 9px 8px;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 2px solid var(--bg);
+  background: var(--fg);
+  color: var(--bg);
+  pointer-events: auto;
 }
-.help-box dt { justify-self: start; padding: 0 5px; border: 1px solid var(--fg); white-space: nowrap; }
-.help-box dd { margin: 0; }
+.demo-skip::before { content: ""; position: absolute; inset: -10px; }   /* larger tap target */
+.demo-skip:hover, .demo-skip:active { background: var(--bg); color: var(--fg); }
+.demo-skip[hidden] { display: none; }
+.demo-text { margin: 0; padding: 7px 10px 9px; }
 
 /* ---------- shot bar ---------- */
 .shotbar {

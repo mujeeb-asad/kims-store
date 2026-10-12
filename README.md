@@ -23,10 +23,10 @@ Gyro look-around needs HTTPS, so test it on the live site rather than on a local
 ## Layout
 
 ```
-index.html                  page shell: welcome card, retro loader, shot bar, look-around menu, help boxes
+index.html                  page shell: welcome card, retro loader, shot bar, look-around menu, demo box
 css/style.css               light/dark tokens, grid background, UI
 js/main.js                  three.js scene, tour/overview modes, flights, photo overlay,
-                            look-around (drag + gyro), mesh / point cloud switch, help overlay
+                            look-around (drag + gyro), mesh / point cloud switch, demo mode
 assets/kims.glb             web-optimized mesh (8 MB; from type_glb/kims_model_but_fixed_axes.glb)
 assets/points.glb           dense point cloud, 1.34M points (9 MB)
 assets/points-preview.glb   coarse point cloud shown while the full one loads (2 MB)
@@ -93,13 +93,28 @@ All commands run from the `CV/` root.
 | L | unlock / lock the camera at a shot to look around (drag or gyro) |
 | C | Compare: fade the photo to 45 % to check the fit against the model |
 | P | switch between mesh and point cloud |
-| H or ? | show / hide the help boxes that explain every control |
+| H or ? | start, pause or resume demo mode |
 | Esc | leave the shot, back to overview |
 | Drag / scroll (overview) | orbit / zoom; click or tap a camera to step into its photo |
 
 Gliding the mouse over the Mesh / Points switch, or long-pressing it on a phone, slides out its full
-labels (a long-press only reveals them; it doesn't switch modes). The help boxes are grouped per set of
-controls (view switch, side column, bottom bar), follow what is on screen, and never block the page.
+labels (a long-press only reveals them; it doesn't switch modes).
+
+### Demo mode
+
+The `?` button under the Mesh / Points switch starts a guided walk through every control. It shows one
+retro box at a time with an arrow to the control to try, and moves on about five seconds after the
+visitor has tried it:
+
+Compare, Nav, Drag, Gyro and "move your phone" (phones with a motion sensor only), Recenter, Overview,
+orbiting the store, Mesh / Points, a brief note on the theme button, picking a camera, and done.
+
+- The demo starts in the tour, from the default photo or the one last visited.
+- The close box in a box's title bar skips that step.
+- Pressing `?` again leaves the demo; it resumes at the same step until the page is closed or reloaded.
+- If the visitor wanders off (for example into the overview mid-tour), the box turns into a nudge
+  pointing at the way back.
+- When the camera first settles, the button slides out a "Lost? Try demo mode" label once.
 
 While the camera is unlocked in Drag mode, swiping looks around instead of changing shots; the arrow
 buttons still navigate. Gyro mode asks for motion permission on iPhone and falls back to Drag when

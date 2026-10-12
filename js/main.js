@@ -398,7 +398,7 @@ async function goToShot(i) {
   const s = shots[i];
   const arrived = await flyTo(s.position, s.quaternion, shotFov());
   if (!arrived) return;
-  showReprLabels(1000);
+  showDemoHint(1000);
   const tex = await texPromise;
   if (tex && state.shot === i && !body.classList.contains('flying')) showPhoto(i, tex);
 }
@@ -417,7 +417,7 @@ async function enterOverview() {
   controls.target.copy(target);
   controls.enabled = true;
   controls.update();
-  showReprLabels(0);
+  showDemoHint(0);
 }
 
 function enterTour() {
@@ -440,6 +440,7 @@ const look = {
   gyroSteady: 0,         // consecutive steady readings so far
   gyroSamples: 0,        // readings since (re)centring
   gyroLive: false,
+  gyroFailed: false,     // a start was refused or found no sensor (the demo then skips its gyro steps)
 };
 let gyroToken = 0;
 const lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -534,7 +535,7 @@ function onOrientation(e) {
 
 async function startGyro() {
   const token = ++gyroToken;
-  const fail = (msg) => { if (token !== gyroToken) return; setLookMode('drag'); setLookNote(msg, true); };
+  const fail = (msg) => { if (token !== gyroToken) return; look.gyroFailed = true; setLookMode('drag'); setLookNote(msg, true); };
   if (!('DeviceOrientationEvent' in window)) return fail('This browser has no motion sensor access. Using drag instead.');
   if (!window.isSecureContext) return fail('Gyro needs the https version of the site. Using drag instead.');
   // iOS 13+: must be asked from the tap itself, which is why this runs straight from the click handler
@@ -613,8 +614,8 @@ ui.compare.addEventListener('click', () => setCompare(!state.compare));
 window.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey || !state.ready || state.view === 'welcome') return;
   const inShot = state.shot >= 0;
-  if (e.key === 'Escape' && help.open) { setHelp(false); e.preventDefault(); return; }
-  if (e.key === 'h' || e.key === 'H' || e.key === '?') { setHelp(!help.open); e.preventDefault(); return; }
+  if (e.key === 'Escape' && demo.on) { setDemo(false); e.preventDefault(); return; }
+  if (e.key === 'h' || e.key === 'H' || e.key === '?') { setDemo(!demo.on); e.preventDefault(); return; }
   if (e.key === 'ArrowRight') { inShot ? goToShot(state.shot + 1) : (setView('tour'), goToShot(state.lastShot)); }
   else if (e.key === 'ArrowLeft') { inShot ? goToShot(state.shot - 1) : (setView('tour'), goToShot(state.lastShot)); }
   else if (e.key === 'Escape' && inShot) enterOverview();
@@ -956,140 +957,184 @@ async function setRepresentation(mode) {
 
 ui.reprBtns.forEach((b) => b.addEventListener('click', () => setRepresentation(b.dataset.repr)));
 
-// The full names slide out next to the Mesh / Points icons (timings live in the CSS):
-//  - once per visit, when the camera first settles, held for a moment;
-//  - whenever the mouse glides over the switch, for as long as it stays there;
-//  - on a touch long-press, staying a little after the finger lifts.
-const REPR_LABELS_HOLD = 2800;       // automatic showing: open -> start closing, ms
-const REPR_LONG_PRESS = 450;         // ms a finger must rest on the switch
-const REPR_AFTER_PRESS = 2000;       // ms the labels stay after a long-press ends
-const reprLabels = { shown: false, timer: 0, hover: false, pressTimer: 0, longPressed: false };
+// Slide-out label drawers (timings live in the CSS). A drawer opens while the mouse glides over
+// its control, and on a touch long-press, which only reveals the label and never clicks.
+const DRAWER_HOLD = 2800;         // automatic showing: open -> start closing, ms
+const DRAWER_LONG_PRESS = 450;    // ms a finger must rest on the control
+const DRAWER_AFTER_PRESS = 2000;  // ms the label stays after a long-press ends
 
-function openReprLabels() {
-  if (help.open) return;   // the help box next to the switch already names both modes
-  clearTimeout(reprLabels.timer);
-  ui.reprWrap.classList.add('labels-open');
-}
-function closeReprLabels(delay = 0) {
-  clearTimeout(reprLabels.timer);
-  reprLabels.timer = setTimeout(() => {
-    if (!reprLabels.hover) ui.reprWrap.classList.remove('labels-open');
-  }, delay);
-}
-function showReprLabels(delay) {
-  if (reprLabels.shown) return;
-  reprLabels.shown = true;
-  setTimeout(() => { openReprLabels(); closeReprLabels(REPR_LABELS_HOLD); }, delay);
-}
-
-ui.reprWrap.addEventListener('pointerenter', (e) => {
-  if (e.pointerType !== 'mouse') return;
-  reprLabels.hover = true;
-  openReprLabels();
-});
-ui.reprWrap.addEventListener('pointerleave', (e) => {
-  if (e.pointerType !== 'mouse') return;
-  reprLabels.hover = false;
-  closeReprLabels(150);
-});
-ui.reprWrap.addEventListener('pointerdown', (e) => {
-  if (e.pointerType === 'mouse') return;
-  reprLabels.longPressed = false;
-  clearTimeout(reprLabels.pressTimer);
-  reprLabels.pressTimer = setTimeout(() => { reprLabels.longPressed = true; openReprLabels(); }, REPR_LONG_PRESS);
-});
-for (const type of ['pointerup', 'pointercancel']) {
-  ui.reprWrap.addEventListener(type, (e) => {
+function makeDrawer(wrap) {
+  const d = { timer: 0, hover: false, pressTimer: 0, longPressed: false };
+  d.open = () => { clearTimeout(d.timer); wrap.classList.add('labels-open'); };
+  d.close = (delay = 0) => {
+    clearTimeout(d.timer);
+    d.timer = setTimeout(() => { if (!d.hover) wrap.classList.remove('labels-open'); }, delay);
+  };
+  d.flash = () => { d.open(); d.close(DRAWER_HOLD); };
+  wrap.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { d.hover = true; d.open(); } });
+  wrap.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') { d.hover = false; d.close(150); } });
+  wrap.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse') return;
-    clearTimeout(reprLabels.pressTimer);
-    if (reprLabels.longPressed) closeReprLabels(REPR_AFTER_PRESS);
+    d.longPressed = false;
+    clearTimeout(d.pressTimer);
+    d.pressTimer = setTimeout(() => { d.longPressed = true; d.open(); }, DRAWER_LONG_PRESS);
   });
+  for (const type of ['pointerup', 'pointercancel']) {
+    wrap.addEventListener(type, (e) => {
+      if (e.pointerType === 'mouse') return;
+      clearTimeout(d.pressTimer);
+      if (d.longPressed) d.close(DRAWER_AFTER_PRESS);
+    });
+  }
+  // swallow the click that follows a long-press
+  wrap.addEventListener('click', (e) => {
+    if (!d.longPressed) return;
+    d.longPressed = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+  wrap.addEventListener('contextmenu', (e) => e.preventDefault());
+  return d;
 }
-// a long-press only reveals the labels: swallow the click that follows it
-ui.reprWrap.addEventListener('click', (e) => {
-  if (!reprLabels.longPressed) return;
-  reprLabels.longPressed = false;
-  e.stopPropagation();
-  e.preventDefault();
-}, true);
-ui.reprWrap.addEventListener('contextmenu', (e) => e.preventDefault());
+
+const reprDrawer = makeDrawer(ui.reprWrap);   // Mesh / Point cloud: on hover or long-press only
 ui.reprLabels.forEach((l) => l.addEventListener('click', () => setRepresentation(l.dataset.for)));
 
-/* ------------------------------------------------------------------ help */
+/* ------------------------------------------------------------------ demo mode */
 
-// One retro box per group of controls (top switch, side column, bottom bar), each joined by a
-// line to a dashed outline around its group. The text follows what is on screen, and the page
-// stays fully usable underneath: the overlay never takes pointer events.
-const helpEls = {
-  root: $('#help'),
-  svg: $('#help-lines'),
-  btn: $('#help-toggle'),
-  boxes: { top: $('#help-top'), side: $('#help-side'), bottom: $('#help-bottom') },
+// The ? button walks a visitor through every control, one retro box at a time. Each box points
+// at the control to try and gives way once the visitor has tried it; after a short pause the next
+// one appears. Leaving mid-way keeps the place until the page is closed; finishing resets it.
+const DEMO_LAPSE = 5000;    // pause after the visitor completes a step, ms
+const DEMO_BRIEF = 3000;    // how long a pass-by note stays, ms
+const DEMO_GAP = 26;        // arrow length between a box and its control
+const DEMO_PAD = 5;         // dashed outline's distance from the control
+const DEMO_MARGIN = 12;     // boxes keep this far from the screen edge
+
+const demoEls = {
+  root: $('#demo'), svg: $('#demo-lines'), box: $('#demo-box'), title: $('#demo-title'), count: $('#demo-count'),
+  text: $('#demo-text'), skip: $('#demo-skip'), btn: $('#demo-toggle'), wrap: $('#demo-wrap'), label: $('#demo-label'),
 };
-const help = { open: false, raf: 0, hideTimer: 0, text: {}, geometry: '' };
+const demo = {
+  on: false, step: 0, entered: false, shown: false, waitUntil: 0, autoAt: 0, base: null,
+  raf: 0, hideTimer: 0, key: '', swapAt: 0, geometry: '', recenters: 0, noGyro: false, hinted: false,
+};
+const demoDrawer = makeDrawer(demoEls.wrap);
 
-// one persistent <g> per group: dashed outline, link and end cap, each over a background-coloured
-// halo so the strokes read over any photo
-helpEls.links = Object.fromEntries(Object.keys(helpEls.boxes).map((key) => {
+// arrow and dashed outline, each over a background-coloured halo so they read over any photo
+demoEls.pointer = (() => {
   const make = (tag, cls) => {
     const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
     el.setAttribute('class', cls);
     return el;
   };
-  const g = make('g', 'help-group');
+  const g = make('g', 'demo-pointer');
   const outlines = [make('rect', 'group halo'), make('rect', 'group')];
   const lines = [make('polyline', 'link halo'), make('polyline', 'link')];
-  const caps = [make('rect', 'cap halo'), make('rect', 'cap')];
-  g.append(outlines[0], lines[0], caps[0], outlines[1], lines[1], caps[1]);
-  helpEls.svg.append(g);
-  return [key, { g, outlines, lines, caps }];
-}));
-const HELP_MARGIN = 12;   // boxes keep this far from the screen edge
-const HELP_GAP = 22;      // length of the link between a box and its group
-const HELP_PAD = 6;       // dashed outline's distance from the controls
+  const heads = [make('polygon', 'cap halo'), make('polygon', 'cap')];
+  g.append(outlines[0], lines[0], heads[0], outlines[1], lines[1], heads[1]);
+  demoEls.svg.append(g);
+  return { g, outlines, lines, heads };
+})();
 
-function helpGroups() {
-  const touch = window.matchMedia('(hover: none)').matches;
-  const groups = {
-    top: { title: 'VIEW', rows: [['Tour', 'step through the photos'], ['Overview', 'orbit the whole store']] },
-    side: { title: 'DISPLAY', rows: [['Theme', 'light or dark'], ['Mesh', 'textured 3D surface'], ['Points', 'dense point cloud'], ['?', 'show or hide this help']] },
-  };
-  if (state.shot >= 0) {
-    const swipes = look.mode !== 'drag';   // in Drag mode a swipe looks around instead
-    const rows = [
-      ['< >', `previous / next photo${swipes ? (touch ? ', or swipe' : ', or arrow keys') : ''}`],
-      ['Compare', 'fade the photo to check the fit'],
-      ['Overview', 'back out to the whole store'],
-    ];
-    if (look.mode === 'locked') {
-      rows.push(['Nav', 'unlock to look around: drag/gyro']);
-    } else {
-      rows.push(['Nav', 'lock back onto the photo'], ['Drag', 'look around by dragging'],
-        ['Gyro', touch ? 'look around by moving your phone' : 'look around with a phone\'s motion sensor'],
-        ['Recenter', 'return to the photo\'s framing']);
-    }
-    groups.bottom = { title: look.mode === 'locked' ? 'PHOTO' : 'PHOTO + LOOK AROUND', rows };
-  } else if (state.view === 'overview') {
-    groups.bottom = {
-      title: 'MOVE',
-      rows: [['Drag', 'orbit around the store'], [touch ? 'Pinch' : 'Scroll', 'zoom in and out'],
-        [touch ? 'Tap' : 'Click', 'a pink camera to step into its photo']],
-    };
-  }
-  return groups;
-}
+const touchUI = () => window.matchMedia('(hover: none)').matches;
+const tapWord = () => (touchUI() ? 'Tap' : 'Click');
+const demoHasGyro = () => touchUI() && 'DeviceOrientationEvent' in window && window.isSecureContext && !look.gyroFailed && !demo.noGyro;
+const modeBtn = (mode) => $(`.mode[data-mode="${mode}"]`);
+const lookBtn = (mode) => $(`.seg-btn[data-look="${mode}"]`);
 
-// The controls each group points at. A group's box only shows while every one of them is
-// actually on screen (see helpShown), so a box never points at something still fading in.
-function helpTargetEls() {
-  const els = { top: [$('.modes')], side: [$('#theme-toggle'), $('.repr'), helpEls.btn] };
-  if (state.shot >= 0) els.bottom = look.mode === 'locked' ? [$('#shotbar')] : [$('#shotbar'), $('#look-menu')];
-  else if (state.view === 'overview') els.bottom = [$('#hint')];
-  return els;
-}
+// When the visitor has wandered off, the box turns into a short nudge towards the way back.
+const backToTour = () => state.shot < 0 && { text: `${tapWord()} Tour to carry on with the demo.`, target: () => modeBtn('tour'), place: 'below' };
+const backToUnlocked = () => look.mode === 'locked' && { text: `${tapWord()} Nav again to carry on.`, target: () => ui.lookLock, place: 'above' };
+const backToGyro = () => look.mode !== 'gyro' && { text: 'Tap Gyro again to carry on.', target: () => lookBtn('gyro'), place: 'above' };
+const backToOverview = () => state.shot >= 0 && { text: `${tapWord()} Overview to carry on.`, target: () => modeBtn('overview'), place: 'below' };
+
+// target: the control the box points at (none = a floating box under the top bar)
+// done:   polled every frame; true once the visitor has tried the thing
+// need:   returns a nudge (see above) while the step cannot be done from where the visitor is
+// wait:   pause after done (default DEMO_LAPSE);  auto: the box passes by on its own after this long
+const DEMO_STEPS = [
+  {
+    id: 'compare', title: 'COMPARE', scene: 'tour', place: 'above', target: () => ui.compare, need: backToTour,
+    text: () => `Fades the photo so you can check it against the 3D model behind it. ${tapWord()} Compare to try it.`,
+    enter: () => { demo.base = state.compare; },
+    done: () => state.compare !== demo.base,
+  },
+  {
+    id: 'nav', title: 'NAV', scene: 'tour', place: 'above', target: () => ui.lookLock, need: backToTour,
+    text: () => `Nav unlocks the camera so you can look around from this exact spot, by dragging or with a phone's gyro. ${tapWord()} Nav.`,
+    done: () => look.mode !== 'locked',
+  },
+  {
+    id: 'drag', title: 'DRAG', scene: 'tour', place: 'above', target: () => lookBtn('drag'), need: () => backToTour() || backToUnlocked(),
+    text: () => (touchUI() ? 'Drag is on. Slide a finger across the picture to look around.' : 'Drag is on. Click and drag the picture to look around.'),
+    enter: () => { demo.base = [look.targetYaw, look.targetPitch]; },
+    done: () => Math.hypot(look.targetYaw - demo.base[0], look.targetPitch - demo.base[1]) > 0.07,
+  },
+  {
+    id: 'gyro', title: 'GYRO', scene: 'tour', place: 'above', target: () => lookBtn('gyro'), need: () => backToTour() || backToUnlocked(),
+    skip: () => !demoHasGyro(),
+    text: () => 'Gyro lets you look around by moving your phone. Tap Gyro. Your phone may ask for permission.',
+    done: () => look.mode === 'gyro' && look.gyroLive,
+    wait: 0,   // "move your phone" takes its place straight away
+  },
+  {
+    id: 'move', title: 'GYRO', scene: 'tour', place: 'above', target: () => lookBtn('gyro'), need: () => backToTour() || backToUnlocked() || backToGyro(),
+    skip: () => !demoHasGyro(),
+    text: () => 'Now move your phone around!',
+    enter: () => { demo.base = [look.targetYaw, look.targetPitch]; },
+    done: () => Math.hypot(look.targetYaw - demo.base[0], look.targetPitch - demo.base[1]) > 0.14,
+  },
+  {
+    id: 'recenter', title: 'RECENTER', scene: 'tour', place: 'above', target: () => $('#look-recenter'), need: () => backToTour() || backToUnlocked(),
+    text: () => `Recenter snaps the view back to the photo's exact framing. ${tapWord()} Recenter.`,
+    enter: () => { demo.base = demo.recenters; },
+    done: () => demo.recenters > demo.base,
+  },
+  {
+    id: 'overview', title: 'OVERVIEW', place: 'below', target: () => modeBtn('overview'),
+    text: () => `Overview shows the whole store at once. ${tapWord()} Overview.`,
+    done: () => state.shot < 0 && state.view === 'overview',
+  },
+  {
+    id: 'orbit', title: 'LOOK AROUND', need: backToOverview, ready: () => controls.enabled,
+    text: () => `This is the whole store. Drag to orbit it, ${touchUI() ? 'pinch' : 'scroll'} to zoom.`,
+    enter: () => { demo.base = null; },
+    done: () => {
+      // measure from where the camera rests once it has landed, not from mid-flight
+      if (!controls.enabled) { demo.base = null; return false; }
+      if (!demo.base) { demo.base = { p: camera.position.clone(), q: camera.quaternion.clone() }; return false; }
+      return camera.quaternion.angleTo(demo.base.q) > 0.07 || camera.position.distanceTo(demo.base.p) > 0.6;
+    },
+  },
+  {
+    id: 'repr', title: 'MESH / POINTS', place: 'left', target: () => $('.repr'),
+    text: () => (demo.base === 'mesh'
+      ? `Mesh is the textured 3D surface. Points is the dense point cloud it was built from. ${tapWord()} the dots to try Points.`
+      : `Points is the dense point cloud. Mesh is the textured 3D surface built from it. ${tapWord()} the cube to try Mesh.`),
+    enter: () => { demo.base = repr.wanted; },
+    done: () => repr.current !== demo.base && repr.current === repr.wanted,
+  },
+  {
+    id: 'theme', title: 'PSST', place: 'left', target: () => $('#theme-toggle'),
+    text: () => 'This one flips between light and dark.',
+    auto: DEMO_BRIEF, wait: 400,
+  },
+  {
+    id: 'pick', title: 'STEP IN', ready: () => !body.classList.contains('flying'),
+    text: () => `Now ${tapWord().toLowerCase()} any pink camera to step into its photo.`,
+    done: () => state.shot >= 0 && !body.classList.contains('flying'),
+    wait: 700,
+  },
+  {
+    id: 'done', title: 'DEMO', ready: () => !body.classList.contains('flying'),
+    text: () => "And we're done! Enjoy the store.",
+    auto: 3500, last: true,
+  },
+];
 
 // fully visible: neither the element nor any ancestor is hidden or still fading
-function helpShown(el) {
+function demoShown(el) {
   for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
     const cs = getComputedStyle(n);
     if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.98) return false;
@@ -1097,7 +1142,7 @@ function helpShown(el) {
   return true;
 }
 
-function helpRect(els) {
+function demoRect(els, pad = 0) {
   const r = { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity };
   for (const el of els) {
     // layout size around the on-screen centre: a hover rotation or press scale on a button
@@ -1106,144 +1151,198 @@ function helpRect(els) {
     const cx = (q.left + q.right) / 2, cy = (q.top + q.bottom) / 2, hw = el.offsetWidth / 2, hh = el.offsetHeight / 2;
     r.l = Math.min(r.l, cx - hw); r.t = Math.min(r.t, cy - hh); r.r = Math.max(r.r, cx + hw); r.b = Math.max(r.b, cy + hh);
   }
-  return { l: r.l - HELP_PAD, t: r.t - HELP_PAD, r: r.r + HELP_PAD, b: r.b + HELP_PAD };
+  return { l: r.l - pad, t: r.t - pad, r: r.r + pad, b: r.b + pad };
 }
 
-// Straight line where the box and its group overlap along one axis; an L out of the box's
-// side when the group sits diagonally from it (the side box on narrow screens).
-function helpLink(box, tgt) {
+// Arrow from the box to its control: straight where they overlap along one axis, otherwise out of
+// the box's side, along the gap between them and into the control's side.
+function demoLink(box, tgt) {
   const mid = (a, b) => (a + b) / 2;
   if (box.b <= tgt.t || box.t >= tgt.b) {
     const above = box.b <= tgt.t;
     const y0 = above ? box.b : box.t, y1 = above ? tgt.t : tgt.b;
-    const lo = Math.max(box.l + 12, tgt.l + 6), hi = Math.min(box.r - 12, tgt.r - 6);
+    const lo = Math.max(box.l + 12, tgt.l + 4), hi = Math.min(box.r - 12, tgt.r - 4);
     if (lo <= hi) { const x = clamp(mid(tgt.l, tgt.r), lo, hi); return [[x, y0], [x, y1]]; }
-    const x1 = clamp(mid(tgt.l, tgt.r), tgt.l + 6, tgt.r - 6);
-    const ySide = above ? box.b - 16 : box.t + 16;
-    return [[box.r <= tgt.l ? box.r : box.l, ySide], [x1, ySide], [x1, y1]];
+    const left = box.r <= tgt.l;
+    const xs = left ? box.r : box.l, xe = left ? tgt.l : tgt.r, ys = above ? box.b - 16 : box.t + 16;
+    return [[xs, ys], [mid(xs, xe), ys], [mid(xs, xe), mid(tgt.t, tgt.b)], [xe, mid(tgt.t, tgt.b)]];
   }
   const left = box.r <= tgt.l;
   const x0 = left ? box.r : box.l, x1 = left ? tgt.l : tgt.r;
-  const lo = Math.max(box.t + 12, tgt.t + 6), hi = Math.min(box.b - 12, tgt.b - 6);
+  const lo = Math.max(box.t + 12, tgt.t + 4), hi = Math.min(box.b - 12, tgt.b - 4);
   if (lo <= hi) { const y = clamp(mid(tgt.t, tgt.b), lo, hi); return [[x0, y], [x1, y]]; }
-  const y0 = clamp(mid(tgt.t, tgt.b), box.t + 12, box.b - 12), y1 = clamp(y0, tgt.t + 6, tgt.b - 6);
+  const y0 = clamp(mid(tgt.t, tgt.b), box.t + 12, box.b - 12), y1 = clamp(y0, tgt.t + 4, tgt.b - 4);
   return [[x0, y0], [mid(x0, x1), y0], [mid(x0, x1), y1], [x1, y1]];
 }
 
-function layoutHelp() {
-  // 1. which groups can show right now, and their text
-  const groups = helpGroups();
-  const els = helpTargetEls();
-  const live = {};
-  for (const [key, box] of Object.entries(helpEls.boxes)) {
-    const g = groups[key];
-    live[key] = Boolean(g && els[key] && els[key].every(helpShown));
-    if (!live[key]) continue;   // a box that is fading out keeps the text it had
-    const text = JSON.stringify(g);
-    if (text === help.text[key]) continue;
-    help.text[key] = text;
-    box.querySelector('.help-title').textContent = g.title;
-    box.querySelector('dl').replaceChildren(...g.rows.flatMap(([k, v]) => {
-      const dt = document.createElement('dt'), dd = document.createElement('dd');
-      dt.textContent = k; dd.textContent = v;
-      return [dt, dd];
-    }));
+function demoPlace(view, t, size, vw, vh) {
+  const top = demoRect([$('.modes')]);
+  const column = demoRect([$('#theme-toggle'), $('.repr'), demoEls.btn]);
+  let x, y;
+  if (!t) {                                   // floating: centred under the top bar
+    x = (vw - size.w) / 2; y = top.b + 18;
+  } else if (view.place === 'left') {         // beside a control in the right-hand column
+    x = t.l - DEMO_GAP - size.w; y = (t.t + t.b) / 2 - size.h / 2;
+    if (x < top.r + 10 && y < top.b + 10) y = top.b + 10;   // narrow screens: stay under the top bar
+  } else {
+    x = (t.l + t.r) / 2 - size.w / 2;
+    y = view.place === 'below' ? t.b + DEMO_GAP : t.t - DEMO_GAP - size.h;
   }
+  x = clamp(x, DEMO_MARGIN, Math.max(DEMO_MARGIN, vw - DEMO_MARGIN - size.w));
+  y = clamp(y, DEMO_MARGIN, Math.max(DEMO_MARGIN, vh - DEMO_MARGIN - size.h));
+  // stay clear of the right-hand column
+  if (view.place !== 'left' && x + size.w > column.l - 8 && y < column.b + 8 && y + size.h > column.t - 8) {
+    x = Math.max(DEMO_MARGIN, column.l - 10 - size.w);
+  }
+  // a box above the photo bar also clears the look-around menu when that is open
+  const menu = $('#look-menu');
+  if (t && view.place === 'above' && demoShown(menu)) {
+    const m = demoRect([menu]);
+    if (t.t >= m.b - 2 && y + size.h > m.t - 10) y = m.t - 12 - size.h;
+  }
+  return { x: Math.round(x), y: Math.round(y) };
+}
 
-  // 2. measure (all reads before any writes)
+function demoOff() {
+  demoEls.box.classList.remove('on');
+  demoEls.pointer.g.classList.remove('on');
+}
+
+// Shows `view` (a step or a nudge); returns true while its box is on screen.
+function demoRender(view, counter) {
+  if (!view) { demoOff(); return false; }
+  const now = performance.now();
+  if (view.key !== demo.key) {
+    // a different box: let the old one fade out before the text changes
+    if (demoEls.box.classList.contains('on')) { demoOff(); demo.swapAt = now + 240; }
+    if (now < demo.swapAt) return false;
+    demo.key = view.key;
+    demo.geometry = '';
+    demoEls.title.textContent = view.title;
+    demoEls.count.textContent = counter;
+    demoEls.text.textContent = view.text();
+    demoEls.skip.hidden = Boolean(view.auto);
+  }
+  const target = view.target ? view.target() : null;
+  const ready = target ? demoShown(target) : (view.ready ? view.ready() : true);
+  if (!ready) { demoOff(); return false; }
+
+  // measure, then write only when something moved
   const vw = window.innerWidth, vh = window.innerHeight;
-  const tg = {}, size = {};
-  for (const [key, box] of Object.entries(helpEls.boxes)) {
-    if (!live[key]) continue;
-    tg[key] = helpRect(els[key]);
-    size[key] = { w: box.offsetWidth, h: box.offsetHeight };
-  }
-  const geometry = JSON.stringify([vw, vh, live, tg, size]);
-  if (geometry === help.geometry) return;
-  help.geometry = geometry;
-
-  // 3. place the boxes: top one under the view switch, side one left of the column, bottom one above the bar
-  const sideLeft = (tg.side ? tg.side.l : vw - 60) - HELP_GAP;   // nothing may cross into the side column
-  const maxW = { top: Math.min(310, sideLeft - 14 - HELP_MARGIN), side: Math.min(300, sideLeft - HELP_MARGIN), bottom: Math.min(380, vw - 2 * HELP_MARGIN) };
-  const pos = {};
-  if (live.top) {
-    pos.top = {
-      x: clamp((tg.top.l + tg.top.r) / 2 - size.top.w / 2, HELP_MARGIN, Math.max(HELP_MARGIN, sideLeft + 8 - size.top.w)),
-      y: tg.top.b + HELP_GAP,
-    };
-  }
-  if (live.side) {
-    pos.side = { x: sideLeft - size.side.w, y: tg.side.t };
-    const hits = (b) => b && pos.side.x < b.r + 8 && pos.side.x + size.side.w > b.l - 8 && pos.side.y < b.b + 8 && pos.side.y + size.side.h > b.t - 8;
-    const topBox = pos.top && { l: pos.top.x, t: pos.top.y, r: pos.top.x + size.top.w, b: pos.top.y + size.top.h };
-    if (hits(topBox)) pos.side.y = topBox.b + 14;                 // narrow screens: stack it under the first box
-    else if (hits(tg.top)) pos.side.y = tg.top.b + HELP_GAP;
-  }
-  if (live.bottom) {
-    pos.bottom = {
-      x: clamp((tg.bottom.l + tg.bottom.r) / 2 - size.bottom.w / 2, HELP_MARGIN, Math.max(HELP_MARGIN, vw - HELP_MARGIN - size.bottom.w)),
-      y: tg.bottom.t - HELP_GAP - size.bottom.h,
-    };
-    // Short screens: if the bottom box would run into the stack above it, drop the VIEW box
-    // (its two buttons already say what they do) and move the side box up into its place.
-    if (pos.top && pos.side && pos.side.y > pos.top.y && pos.bottom.y < pos.side.y + size.side.h + 10) {
-      pos.side.y = pos.top.y;
-      delete pos.top;
-    }
-  }
-
-  // 4. write: each box with its outline and link, on only while its controls are on screen
-  helpEls.root.classList.toggle('compact', vh < 720 || vw < 380);
-  for (const [key, box] of Object.entries(helpEls.boxes)) {
-    const on = Boolean(pos[key]);
-    box.classList.toggle('on', on);
-    helpEls.links[key].g.classList.toggle('on', on);
-    if (!on) continue;
-    const x = Math.round(pos[key].x), y = Math.round(pos[key].y);
-    box.style.left = `${x}px`;
-    box.style.top = `${y}px`;
-    box.style.maxWidth = `${Math.max(150, Math.round(maxW[key]))}px`;
-    const t = tg[key];
-    const pts = helpLink({ l: x, t: y, r: x + size[key].w, b: y + size[key].h }, t).map(([px, py]) => [Math.round(px), Math.round(py)]);
-    const [ex, ey] = pts[pts.length - 1];
-    const { outlines, lines, caps } = helpEls.links[key];
+  const t = target ? demoRect([target], DEMO_PAD) : null;
+  const size = { w: demoEls.box.offsetWidth, h: demoEls.box.offsetHeight };
+  const pos = demoPlace(view, t, size, vw, vh);
+  const geometry = JSON.stringify([vw, vh, t, size, pos]);
+  demoEls.box.classList.add('on');
+  demoEls.pointer.g.classList.toggle('on', Boolean(t));
+  if (geometry === demo.geometry) return true;
+  demo.geometry = geometry;
+  demoEls.root.classList.toggle('compact', vh < 720 || vw < 380);
+  demoEls.box.style.left = `${pos.x}px`;
+  demoEls.box.style.top = `${pos.y}px`;
+  if (t) {
+    const pts = demoLink({ l: pos.x, t: pos.y, r: pos.x + size.w, b: pos.y + size.h }, t).map(([px, py]) => [Math.round(px), Math.round(py)]);
+    const [ex, ey] = pts[pts.length - 1], [px, py] = pts[pts.length - 2];
+    const ux = Math.sign(ex - px), uy = Math.sign(ey - py);          // direction of the last segment
+    const head = [[ex, ey], [ex - ux * 9 - uy * 5, ey - uy * 9 + ux * 5], [ex - ux * 9 + uy * 5, ey - uy * 9 - ux * 5]];
+    const { outlines, lines, heads } = demoEls.pointer;
     for (const o of outlines) {
       o.setAttribute('x', Math.round(t.l)); o.setAttribute('y', Math.round(t.t));
       o.setAttribute('width', Math.round(t.r - t.l)); o.setAttribute('height', Math.round(t.b - t.t));
     }
     for (const l of lines) l.setAttribute('points', pts.map((q) => q.join(',')).join(' '));
-    caps.forEach((c, k) => {   // halo cap first (8px), then the cap itself (6px)
-      const half = k === 0 ? 4 : 3;
-      c.setAttribute('x', ex - half); c.setAttribute('y', ey - half);
-      c.setAttribute('width', half * 2); c.setAttribute('height', half * 2);
-    });
+    for (const h of heads) h.setAttribute('points', head.map((q) => q.join(',')).join(' '));
   }
+  return true;
 }
 
-function setHelp(on) {
-  if (on === help.open) return;
-  help.open = on;
-  helpEls.btn.setAttribute('aria-pressed', String(on));
-  cancelAnimationFrame(help.raf);
-  clearTimeout(help.hideTimer);
-  if (on) {
-    ui.reprWrap.classList.remove('labels-open');
-    help.geometry = '';
-    help.text = {};
-    helpEls.root.hidden = false;
-    // keep following the controls as bars slide in, modes change or the window resizes
-    const tick = () => { layoutHelp(); help.raf = requestAnimationFrame(tick); };
-    tick();
-  } else {
-    for (const key of Object.keys(helpEls.boxes)) {
-      helpEls.boxes[key].classList.remove('on');
-      helpEls.links[key].g.classList.remove('on');
+function demoAdvance(wait) {
+  demo.step++;
+  demo.entered = false;
+  demo.shown = false;
+  demo.autoAt = 0;
+  demo.waitUntil = performance.now() + wait;
+  demoOff();
+}
+
+function demoCounter() {
+  const live = DEMO_STEPS.filter((s) => !(s.skip && s.skip()));
+  return `${live.indexOf(DEMO_STEPS[demo.step]) + 1}/${live.length}`;
+}
+
+function demoTick() {
+  demo.raf = requestAnimationFrame(demoTick);
+  const now = performance.now();
+  const st = DEMO_STEPS[demo.step];
+  if (!st) { demo.step = 0; setDemo(false); return; }
+  if (st.skip && st.skip()) { demo.step++; demo.entered = false; return; }   // e.g. gyro on a desktop
+  if (now < demo.waitUntil) { demoRender(null); return; }
+  if (!demo.entered) {
+    if (st.enter) st.enter();
+    demo.entered = true;
+    demo.shown = false;
+    demo.autoAt = 0;
+  }
+  // a step the visitor had already done before its box ever showed needs no pause
+  if (st.done && st.done()) { demoAdvance(demo.shown ? (st.wait ?? DEMO_LAPSE) : 0); return; }
+  const nudge = st.need && st.need();
+  const view = nudge
+    ? { title: 'DEMO', ...nudge, key: `${st.id}:${nudge.text}`, text: () => nudge.text }
+    : { ...st, key: st.id };
+  const visible = demoRender(view, demoCounter());
+  if (!visible || nudge) return;
+  demo.shown = true;
+  if (st.auto) {
+    demo.autoAt = demo.autoAt || now + st.auto;
+    if (now >= demo.autoAt) {
+      if (st.last) { demo.step = 0; setDemo(false); } else demoAdvance(st.wait ?? 400);
     }
-    help.hideTimer = setTimeout(() => { helpEls.root.hidden = true; }, 300);
   }
 }
 
-helpEls.btn.addEventListener('click', () => setHelp(!help.open));
+function demoLabel() {
+  const text = demo.on ? 'Leave the demo' : demo.step > 0 ? 'Resume the demo' : 'Lost? Try demo mode';
+  demoEls.label.textContent = text;
+  demoEls.btn.title = `${demo.on ? 'Leave the demo' : demo.step > 0 ? 'Resume the demo' : 'Demo mode'} (H)`;
+}
+
+function setDemo(on) {
+  if (on === demo.on) return;
+  demo.on = on;
+  demoEls.btn.setAttribute('aria-pressed', String(on));
+  cancelAnimationFrame(demo.raf);
+  clearTimeout(demo.hideTimer);
+  demoLabel();
+  if (on) {
+    demoDrawer.hover = false;
+    demoDrawer.close(0);
+    Object.assign(demo, { entered: false, shown: false, waitUntil: 0, autoAt: 0, key: '', swapAt: 0, geometry: '' });
+    demoEls.root.hidden = false;
+    // tour steps start from a photo: the default one, or wherever the visitor last was
+    if (DEMO_STEPS[demo.step].scene === 'tour' && state.shot < 0) enterTour();
+    demoTick();
+  } else {
+    demoOff();
+    demo.hideTimer = setTimeout(() => { demoEls.root.hidden = true; }, 300);
+  }
+}
+
+// Once per visit, when the camera first settles, the demo button slides its invitation out.
+function showDemoHint(delay) {
+  if (demo.hinted) return;
+  demo.hinted = true;
+  setTimeout(() => { if (!demo.on) demoDrawer.flash(); }, delay);
+}
+
+demoEls.btn.addEventListener('click', () => setDemo(!demo.on));
+$('.demo-drawer').addEventListener('click', () => setDemo(!demo.on));
+demoEls.skip.addEventListener('click', () => {
+  if (!demo.on) return;
+  if (DEMO_STEPS[demo.step].id === 'gyro') demo.noGyro = true;   // skipping Gyro also skips "move your phone"
+  demoAdvance(600);
+});
+$('#look-recenter').addEventListener('click', () => { demo.recenters++; });
+demoLabel();
 
 /* ------------------------------------------------------------------ loop */
 
