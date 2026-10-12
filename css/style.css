@@ -296,8 +296,8 @@ body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-
 .repr-btn.loading { animation: pulse 1s ease-in-out infinite; }
 .repr-drawer span:hover { color: var(--fg); }
 
-/* Demo button with its own drawer ("Lost? Try demo mode"). Open, the drawer spans the button and
-   the button keeps its own outline, so it still reads as a button at the end of the banner. */
+/* Demo button with its own drawer ("Lost? Try demo mode"), built like the one above: open, the
+   drawer spans the button and the button's outline fades, so the two read as one pill. */
 .demo-wrap {
   position: relative;
   -webkit-touch-callout: none;
@@ -311,10 +311,10 @@ body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-
   font-size: 15px;
   font-weight: 500;
   line-height: 1;
-  transition: transform .3s var(--ease), background-color .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+  transition: transform .3s var(--ease), background-color .15s var(--ease) .8s, border-color .15s var(--ease) .8s, color .15s var(--ease);
 }
 .demo-btn:hover { transform: scale(1.06); }
-.demo-btn[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.demo-btn[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); transition: transform .3s var(--ease), color .15s var(--ease); }
 .demo-drawer {
   position: absolute;
   top: 0;
@@ -337,9 +337,10 @@ body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-
   transition: clip-path .55s var(--ease) .25s, visibility 0s linear .95s;
 }
 .demo-drawer span {
+  /* same type and colour as the Mesh / Point cloud labels above */
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--fg);
+  color: var(--muted);
   opacity: 0;
   transform: translateX(8px);
   transition: opacity .25s var(--ease), transform .25s var(--ease);
@@ -354,6 +355,14 @@ body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-
   opacity: 1;
   transform: none;
   transition: opacity .35s var(--ease) .3s, transform .35s var(--ease) .3s;
+}
+.demo-drawer:hover span { color: var(--fg); }
+.demo-wrap.labels-open .demo-btn:not([aria-pressed="true"]) {
+  background-color: transparent;
+  border-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: transform .3s var(--ease), background-color .15s var(--ease), border-color .15s var(--ease);
 }
 :root[data-theme="light"] .i-sun { display: none; }
 :root[data-theme="dark"] .i-moon { display: none; }
