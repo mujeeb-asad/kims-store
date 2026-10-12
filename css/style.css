@@ -314,7 +314,21 @@ body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-
   transition: transform .3s var(--ease), background-color .15s var(--ease) .8s, border-color .15s var(--ease) .8s, color .15s var(--ease);
 }
 .demo-btn:hover { transform: scale(1.06); }
-.demo-btn[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); transition: transform .3s var(--ease), color .15s var(--ease); }
+/* pressed: a 32px disc inset in the button, the same size as the active Mesh / Points button,
+   so it sits inside the open banner the way that one sits inside its pill */
+.demo-btn::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--fg);
+  opacity: 0;
+  transform: scale(.7);
+  transition: opacity .2s var(--ease), transform .25s var(--ease);
+}
+.demo-btn[aria-pressed="true"] { color: var(--bg); }
+.demo-btn[aria-pressed="true"]::before { opacity: 1; transform: none; }
 .demo-drawer {
   position: absolute;
   top: 0;
@@ -357,7 +371,7 @@ body:not([data-view="welcome"]) .side-tools { opacity: 1; transform: translate(-
   transition: opacity .35s var(--ease) .3s, transform .35s var(--ease) .3s;
 }
 .demo-drawer:hover span { color: var(--fg); }
-.demo-wrap.labels-open .demo-btn:not([aria-pressed="true"]) {
+.demo-wrap.labels-open .demo-btn {
   background-color: transparent;
   border-color: transparent;
   backdrop-filter: none;

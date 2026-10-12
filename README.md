@@ -119,11 +119,11 @@ starts the moment the visitor begins to drag.
 - The demo starts in the tour, from the default photo or the one last visited.
 - The close box in a box's title bar skips that screen only. Where the skipped control is the way
   into the next screens, those go with it: skipping Nav also skips Drag, Gyro and Recenter, and
-  skipping Overview from a photo also skips orbiting and picking a camera.
+  skipping Overview from a photo also skips orbiting.
 - The step numbers are fixed when the demo starts, so the total never changes; skipped screens
   leave a gap in the count.
-- The last step (picking a pink camera) belongs to the overview: it is skipped along with a skipped
-  Overview step, and nudges the visitor back to the overview if they have wandered off to a photo.
+- The last step (picking a pink camera) always shows. From the overview it asks for a camera; from
+  a photo the same box points at Overview and says to pick one there.
 - Pressing `?` again leaves the demo; it resumes at the same step until the page is closed or reloaded.
 - If the visitor wanders off (for example into the overview mid-tour), the box turns into a nudge
   pointing at the way back.
