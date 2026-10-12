@@ -1007,6 +1007,8 @@ ui.reprLabels.forEach((l) => l.addEventListener('click', () => setRepresentation
 // one appears. Leaving mid-way keeps the place until the page is closed; finishing resets it.
 const DEMO_LAPSE = 5000;    // pause after the visitor completes a step, ms
 const DEMO_BRIEF = 3000;    // how long a pass-by note stays, ms
+const DEMO_GYRO_INTRO = 800;    // after Gyro is turned on, the Recenter box is up about a second later
+const DEMO_GYRO_PLAY = 8000;    // pause after Recenter while gyro is on
 const DEMO_GAP = 26;        // arrow length between a box and its control
 const DEMO_PAD = 5;         // dashed outline's distance from the control
 const DEMO_MARGIN = 12;     // boxes keep this far from the screen edge
@@ -1017,7 +1019,7 @@ const demoEls = {
 };
 const demo = {
   on: false, step: 0, entered: false, shown: false, waitUntil: 0, autoAt: 0, base: null,
-  raf: 0, hideTimer: 0, key: '', swapAt: 0, geometry: '', recenters: 0, noGyro: false, hinted: false,
+  raf: 0, hideTimer: 0, key: '', swapAt: 0, geometry: '', recenters: 0, hinted: false,
 };
 const demoDrawer = makeDrawer(demoEls.wrap);
 
@@ -1039,57 +1041,56 @@ demoEls.pointer = (() => {
 
 const touchUI = () => window.matchMedia('(hover: none)').matches;
 const tapWord = () => (touchUI() ? 'Tap' : 'Click');
-const demoHasGyro = () => touchUI() && 'DeviceOrientationEvent' in window && window.isSecureContext && !look.gyroFailed && !demo.noGyro;
+const demoHasGyro = () => touchUI() && 'DeviceOrientationEvent' in window && window.isSecureContext && !look.gyroFailed;
 const modeBtn = (mode) => $(`.mode[data-mode="${mode}"]`);
 const lookBtn = (mode) => $(`.seg-btn[data-look="${mode}"]`);
 
 // When the visitor has wandered off, the box turns into a short nudge towards the way back.
 const backToTour = () => state.shot < 0 && { text: `${tapWord()} Tour to carry on with the demo.`, target: () => modeBtn('tour'), place: 'below' };
 const backToUnlocked = () => look.mode === 'locked' && { text: `${tapWord()} Nav again to carry on.`, target: () => ui.lookLock, place: 'above' };
-const backToGyro = () => look.mode !== 'gyro' && { text: 'Tap Gyro again to carry on.', target: () => lookBtn('gyro'), place: 'above' };
 const backToOverview = () => state.shot >= 0 && { text: `${tapWord()} Overview to carry on.`, target: () => modeBtn('overview'), place: 'below' };
 
 // target: the control the box points at (none = a floating box under the top bar)
 // done:   polled every frame; true once the visitor has tried the thing
 // need:   returns a nudge (see above) while the step cannot be done from where the visitor is
-// wait:   pause after done (default DEMO_LAPSE);  auto: the box passes by on its own after this long
+// wait:   pause after done (default DEMO_LAPSE; a number or a function);  auto: the box passes by on its own after this long
 const DEMO_STEPS = [
   {
     id: 'compare', title: 'COMPARE', scene: 'tour', place: 'above', target: () => ui.compare, need: backToTour,
     text: () => `Fades the photo so you can check it against the 3D model behind it. ${tapWord()} Compare to try it.`,
     enter: () => { demo.base = state.compare; },
     done: () => state.compare !== demo.base,
+    wait: 1700,   // with the box's fade-in, the next one is up within 2 s
   },
   {
     id: 'nav', title: 'NAV', scene: 'tour', place: 'above', target: () => ui.lookLock, need: backToTour,
     text: () => `Nav unlocks the camera so you can look around from this exact spot, by dragging or with a phone's gyro. ${tapWord()} Nav.`,
     done: () => look.mode !== 'locked',
+    wait: 0,   // the Drag box follows as soon as the look-around menu is up
   },
   {
     id: 'drag', title: 'DRAG', scene: 'tour', place: 'above', target: () => lookBtn('drag'), need: () => backToTour() || backToUnlocked(),
     text: () => (touchUI() ? 'Drag is on. Slide a finger across the picture to look around.' : 'Drag is on. Click and drag the picture to look around.'),
     enter: () => { demo.base = [look.targetYaw, look.targetPitch]; },
-    done: () => Math.hypot(look.targetYaw - demo.base[0], look.targetPitch - demo.base[1]) > 0.07,
+    // any movement counts, so the pause starts the moment the visitor begins to drag
+    done: () => Math.hypot(look.targetYaw - demo.base[0], look.targetPitch - demo.base[1]) > 0.004,
   },
   {
     id: 'gyro', title: 'GYRO', scene: 'tour', place: 'above', target: () => lookBtn('gyro'), need: () => backToTour() || backToUnlocked(),
     skip: () => !demoHasGyro(),
     text: () => 'Gyro lets you look around by moving your phone. Tap Gyro. Your phone may ask for permission.',
     done: () => look.mode === 'gyro' && look.gyroLive,
-    wait: 0,   // "move your phone" takes its place straight away
-  },
-  {
-    id: 'move', title: 'GYRO', scene: 'tour', place: 'above', target: () => lookBtn('gyro'), need: () => backToTour() || backToUnlocked() || backToGyro(),
-    skip: () => !demoHasGyro(),
-    text: () => 'Now move your phone around!',
-    enter: () => { demo.base = [look.targetYaw, look.targetPitch]; },
-    done: () => Math.hypot(look.targetYaw - demo.base[0], look.targetPitch - demo.base[1]) > 0.14,
+    wait: DEMO_GYRO_INTRO,   // people lose their bearings quickly with gyro, so Recenter follows at once
   },
   {
     id: 'recenter', title: 'RECENTER', scene: 'tour', place: 'above', target: () => $('#look-recenter'), need: () => backToTour() || backToUnlocked(),
-    text: () => `Recenter snaps the view back to the photo's exact framing. ${tapWord()} Recenter.`,
+    text: () => (look.mode === 'gyro'
+      ? 'Now move your phone around! Lost? Tap Recenter to snap back to the photo.'
+      : `Recenter snaps the view back to the photo's exact framing. ${tapWord()} Recenter.`),
     enter: () => { demo.base = demo.recenters; },
     done: () => demo.recenters > demo.base,
+    // with gyro on this is the longest pause of the demo: time to keep moving the phone around
+    wait: () => (look.mode === 'gyro' ? DEMO_GYRO_PLAY : DEMO_LAPSE),
   },
   {
     id: 'overview', title: 'OVERVIEW', place: 'below', target: () => modeBtn('overview'),
@@ -1265,6 +1266,8 @@ function demoAdvance(wait) {
   demoOff();
 }
 
+const demoWait = (st, fallback) => (typeof st.wait === 'function' ? st.wait() : st.wait ?? fallback);
+
 function demoCounter() {
   const live = DEMO_STEPS.filter((s) => !(s.skip && s.skip()));
   return `${live.indexOf(DEMO_STEPS[demo.step]) + 1}/${live.length}`;
@@ -1284,7 +1287,7 @@ function demoTick() {
     demo.autoAt = 0;
   }
   // a step the visitor had already done before its box ever showed needs no pause
-  if (st.done && st.done()) { demoAdvance(demo.shown ? (st.wait ?? DEMO_LAPSE) : 0); return; }
+  if (st.done && st.done()) { demoAdvance(demo.shown ? demoWait(st, DEMO_LAPSE) : 0); return; }
   const nudge = st.need && st.need();
   const view = nudge
     ? { title: 'DEMO', ...nudge, key: `${st.id}:${nudge.text}`, text: () => nudge.text }
@@ -1295,7 +1298,7 @@ function demoTick() {
   if (st.auto) {
     demo.autoAt = demo.autoAt || now + st.auto;
     if (now >= demo.autoAt) {
-      if (st.last) { demo.step = 0; setDemo(false); } else demoAdvance(st.wait ?? 400);
+      if (st.last) { demo.step = 0; setDemo(false); } else demoAdvance(demoWait(st, 400));
     }
   }
 }
@@ -1338,7 +1341,6 @@ demoEls.btn.addEventListener('click', () => setDemo(!demo.on));
 $('.demo-drawer').addEventListener('click', () => setDemo(!demo.on));
 demoEls.skip.addEventListener('click', () => {
   if (!demo.on) return;
-  if (DEMO_STEPS[demo.step].id === 'gyro') demo.noGyro = true;   // skipping Gyro also skips "move your phone"
   demoAdvance(600);
 });
 $('#look-recenter').addEventListener('click', () => { demo.recenters++; });

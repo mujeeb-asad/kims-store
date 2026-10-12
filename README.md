@@ -103,11 +103,16 @@ labels (a long-press only reveals them; it doesn't switch modes).
 ### Demo mode
 
 The `?` button under the Mesh / Points switch starts a guided walk through every control. It shows one
-retro box at a time with an arrow to the control to try, and moves on about five seconds after the
-visitor has tried it:
+retro box at a time with an arrow to the control to try, and moves on shortly after the visitor has
+tried it:
 
-Compare, Nav, Drag, Gyro and "move your phone" (phones with a motion sensor only), Recenter, Overview,
-orbiting the store, Mesh / Points, a brief note on the theme button, picking a camera, and done.
+Compare, Nav, Drag, Gyro (phones with a motion sensor only), Recenter, Overview, orbiting the store,
+Mesh / Points, a brief note on the theme button, picking a camera, and done.
+
+The pause before the next box is five seconds by default, with a few exceptions: about two seconds
+after Compare, none after Nav (the Drag box follows at once), one second after Gyro is turned on
+(Recenter follows quickly, since people lose their bearings fast), and eight seconds after Recenter
+while gyro is on. The Drag pause starts the moment the visitor begins to drag.
 
 - The demo starts in the tour, from the default photo or the one last visited.
 - The close box in a box's title bar skips that step.
