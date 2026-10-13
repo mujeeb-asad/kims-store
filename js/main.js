@@ -350,7 +350,8 @@ function setCompare(on) {
 
 /* ------------------------------------------------------------------ flights */
 
-// Moves between photos fly at twice the base pace; the flight out to the overview keeps it.
+// Stepping from one photo to the next flies at twice the base pace. Flying into a photo from
+// elsewhere (starting the tour, or from the overview) and out to the overview keep the base pace.
 const SHOT_FLIGHT_SPEED = 2;
 
 function flyTo(pos, quat, fov, speed = 1) {
@@ -377,6 +378,7 @@ function flyTo(pos, quat, fov, speed = 1) {
 
 async function goToShot(i) {
   if (i < 0 || i >= N) return;   // no wrap-around: the tour ends at the outermost shots
+  const fromPhoto = state.shot >= 0;   // already at (or heading to) a photo: this is a step along the tour
   if (state.shot === -1 && state.view === 'overview' && controls.enabled) {
     state.lastOverview = { pos: camera.position.clone(), target: controls.target.clone() };
   }
@@ -399,7 +401,7 @@ async function goToShot(i) {
   prunePhotos(i);
 
   const s = shots[i];
-  const arrived = await flyTo(s.position, s.quaternion, shotFov(), SHOT_FLIGHT_SPEED);
+  const arrived = await flyTo(s.position, s.quaternion, shotFov(), fromPhoto ? SHOT_FLIGHT_SPEED : 1);
   if (!arrived) return;
   showDemoHint(1000);
   const tex = await texPromise;
