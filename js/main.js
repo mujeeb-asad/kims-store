@@ -350,14 +350,17 @@ function setCompare(on) {
 
 /* ------------------------------------------------------------------ flights */
 
-function flyTo(pos, quat, fov) {
+// Moves between photos fly at twice the base pace; the flight out to the overview keeps it.
+const SHOT_FLIGHT_SPEED = 2;
+
+function flyTo(pos, quat, fov, speed = 1) {
   state.flight?.cancel();
   controls.enabled = false;
   body.classList.add('flying');
   const p0 = camera.position.clone(), q0 = camera.quaternion.clone(), f0 = camera.fov;
   const dist = p0.distanceTo(pos);
   const lift = dist > 3 ? Math.min((dist - 3) * 0.12, 1.5) : 0;   // gentle arc on long jumps
-  const ms = clamp(900 + dist * 110, 1000, 2600);
+  const ms = clamp(900 + dist * 110, 1000, 2600) / speed;
   const flight = tween(ms, (e) => {
     camera.position.lerpVectors(p0, pos, e);
     camera.position.y += Math.sin(Math.PI * e) * lift;
@@ -396,7 +399,7 @@ async function goToShot(i) {
   prunePhotos(i);
 
   const s = shots[i];
-  const arrived = await flyTo(s.position, s.quaternion, shotFov());
+  const arrived = await flyTo(s.position, s.quaternion, shotFov(), SHOT_FLIGHT_SPEED);
   if (!arrived) return;
   showDemoHint(1000);
   const tex = await texPromise;
